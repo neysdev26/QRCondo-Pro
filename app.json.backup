@@ -1,0 +1,55 @@
+{
+  "expo": {
+    "name": "QrCondo App",
+    "slug": "qr-condo-app",
+    "version": "1.0.6",
+    "orientation": "portrait",
+    "scheme": "encomendas",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.neysdev.qrcondo"
+    },
+    "android": {
+      "package": "com.neysdev.qrcondo",
+      "versionCode": 8,
+      "backgroundColor": "#2E7D32",
+      "jsEngine": "hermes",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.INTERNET"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow $(PRODUCT_NAME) to access your camera"
+        }
+      ],
+      "expo-file-system",
+      "expo-web-browser"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "4a81a1cc-15ae-4572-9fb9-291ab5257c3f"
+      },
+      "router": {}
+    }
+  }
+}
