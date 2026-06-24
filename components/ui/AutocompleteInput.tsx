@@ -10,29 +10,33 @@ interface AutocompleteProps {
   suggestions: string[];
   placeholder?: string;
   containerStyle?: object;
+  editable?: boolean;
 }
 
 export default function AutocompleteInput({ 
-  label, value, onChangeText, onSelectSuggestion, suggestions, placeholder, containerStyle 
+  label, value, onChangeText, onSelectSuggestion, suggestions, placeholder, containerStyle, editable = true 
 }: AutocompleteProps) {
   const [showSuggestions, setShowSuggestions] = useState(false);
 
-  // Filtra sugestões que não são iguais ao valor atual
   const filtered = suggestions.filter(item => item && item !== value);
 
   return (
     <View style={[styles.container, containerStyle]}>
       <Text style={styles.label}>{label}</Text>
       <TextInput
-        style={styles.input}
+        style={[styles.input, !editable && styles.disabledInput]}
         value={value}
-        onChangeText={(t: string) => { onChangeText(t); setShowSuggestions(true); }} // 👈 tipagem adicionada
-        onFocus={() => setShowSuggestions(true)}
+        onChangeText={(t: string) => { // 👈 TIPAGEM ADICIONADA
+          onChangeText(t); 
+          setShowSuggestions(true); 
+        }}
+        onFocus={() => { if (editable) setShowSuggestions(true); }}
         onBlur={() => setTimeout(() => setShowSuggestions(false), 250)}
         placeholder={placeholder}
+        editable={editable}
       />
       
-      {showSuggestions && filtered.length > 0 && (
+      {editable && showSuggestions && filtered.length > 0 && (
         <View style={styles.suggestionList}>
           {filtered.map((item, index) => (
             <TouchableOpacity 
@@ -65,6 +69,11 @@ const styles = StyleSheet.create({
     padding: 12, 
     backgroundColor: '#f8fafc', 
     fontSize: 16 
+  },
+  disabledInput: {
+    backgroundColor: '#e2e8f0',
+    borderColor: '#cbd5e1',
+    color: '#475569',
   },
   suggestionList: { 
     position: 'absolute', 

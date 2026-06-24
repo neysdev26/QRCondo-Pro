@@ -11,6 +11,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { decode } from 'base64-arraybuffer';
+import { Audio } from 'expo-av';
 import SignaturePad from '../../components/SignaturePad';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
@@ -26,13 +27,21 @@ export default function ScannerScreen() {
 
   const params = useLocalSearchParams<{ id?: string; data?: string }>();
 
-  const encomendaId: string | undefined = (() => {
+  const [currentEncomendaId, setCurrentEncomendaId] = useState<string | undefined>(undefined);
+
+  const encomendaIdFromParams: string | undefined = (() => {
     if (params.id) return params.id;
     if (params.data) {
       try { return JSON.parse(params.data).id; } catch { return undefined; }
     }
     return undefined;
   })();
+
+  useEffect(() => {
+    if (encomendaIdFromParams) {
+      setCurrentEncomendaId(encomendaIdFromParams);
+    }
+  }, [encomendaIdFromParams]);
 
   // ---------- ESTADOS DO FORMULÁRIO ----------
   const [codigoBarra, setCodigoBarra] = useState('');
@@ -53,6 +62,7 @@ export default function ScannerScreen() {
     porteiro_entrega: '',
     data_retirada: ''
   });
+  const [scanned, setScanned] = useState(false);
 
   // ---------- ESTADOS PARA SUGESTÕES ----------
   const [sugestoesDestinatarios, setSugestoesDestinatarios] = useState<string[]>([]);
@@ -193,7 +203,10 @@ export default function ScannerScreen() {
   // ---------- CARREGAR DADOS DA ENCOMENDA ----------
   useEffect(() => {
     async function carregarEncomenda() {
-      if (!encomendaId) return;
+      if (!currentEncomendaId) {
+        resetForm();
+        return;
+      }
       setLoading(true);
       try {
         if (params.data) {
@@ -210,11 +223,11 @@ export default function ScannerScreen() {
         }
 
         let registro: any = null;
-        const { data: enc } = await supabase.from('encomendas').select('*').eq('encomendas_id', encomendaId).maybeSingle();
+        const { data: enc } = await supabase.from('encomendas').select('*').eq('encomendas_id', currentEncomendaId).maybeSingle();
         if (enc) {
           registro = enc;
         } else {
-          const { data: hist } = await supabase.from('encomendas_historico').select('*').eq('id', encomendaId).maybeSingle();
+          const { data: hist } = await supabase.from('encomendas_historico').select('*').eq('id', currentEncomendaId).maybeSingle();
           registro = hist;
         }
 
@@ -242,6 +255,7 @@ export default function ScannerScreen() {
             porteiro_entrega: registro.porteiro_entrega || '',
             data_retirada: registro.data_retirada || '',
           });
+          setModoEdicao(registro.status !== 'retirada');
         }
       } catch (err) {
         console.error(err);
@@ -250,9 +264,8 @@ export default function ScannerScreen() {
         setLoading(false);
       }
     }
-    if (encomendaId) carregarEncomenda();
-    else resetForm();
-  }, [encomendaId]);
+    carregarEncomenda();
+  }, [currentEncomendaId]);
 
   const resetForm = () => {
     setCodigoBarra('');
@@ -266,6 +279,7 @@ export default function ScannerScreen() {
     setIsReadOnly(false);
     setSavedSignature(null);
     setDeliveryData({ nome_recebedor: '', porteiro_entrega: '', data_retirada: '' });
+    setCurrentEncomendaId(undefined);
     router.setParams({ id: '' });
   };
 
@@ -281,9 +295,70 @@ export default function ScannerScreen() {
     setCameraVisible(true);
   };
 
-  const handleBarCodeScanned = ({ data }: { data: string }) => {
+  const handleBarCodeScanned = async ({ data }: { data: string }) => {
+    if (scanned) return;
+    setScanned(true);
+
+    try {
+      const { sound } = await Audio.Sound.createAsync(
+        require('../../assets/sounds/beep.mp3')
+      );
+      await sound.playAsync();
+    } catch (e) {
+      console.log('Erro ao tocar beep');
+    }
+
+    const { data: encomendaExistente, error } = await supabase
+      .from('encomendas')
+      .select('*')
+      .eq('qr_code', data)
+      .eq('condominio_id', perfil?.condominio_id)
+      .maybeSingle();
+
+    if (encomendaExistente) {
+      setCodigoBarra(encomendaExistente.qr_code || '');
+      setDestinatario(encomendaExistente.destinatario || '');
+      setBloco(encomendaExistente.bloco || '');
+      setApartamento(encomendaExistente.apartamento?.toString() || '');
+      setRemetente(encomendaExistente.remetente || '');
+      setObservacoes(encomendaExistente.observacoes || '');
+      setPorteiroEntrada(encomendaExistente.porteiro_entrada || '');
+      setSavedSignature(encomendaExistente.assinatura || null);
+      setDeliveryData({
+        nome_recebedor: encomendaExistente.nome_recebedor || '',
+        porteiro_entrega: encomendaExistente.porteiro_entrega || '',
+        data_retirada: encomendaExistente.data_retirada || '',
+      });
+
+      // Usa encomendas_id (chave primária da tabela) para isVisualizacao funcionar corretamente
+      const idEncomenda = encomendaExistente.encomendas_id || encomendaExistente.id;
+      setCurrentEncomendaId(idEncomenda);
+      router.setParams({ id: idEncomenda });
+
+      const jaEntregue = encomendaExistente.status === 'retirada';
+      setIsReadOnly(jaEntregue);
+      setModoEdicao(!jaEntregue);
+
+      if (jaEntregue) {
+        Alert.alert('📦 Encomenda já entregue', `Esta encomenda de ${encomendaExistente.destinatario} já foi retirada.`);
+      } else {
+        Alert.alert('✅ Encomenda encontrada', `Registro de ${encomendaExistente.destinatario} carregado. Clique em "REALIZAR ENTREGA" para finalizar.`);
+      }
+    } else {
+      setCodigoBarra(data);
+      setDestinatario('');
+      setBloco('');
+      setApartamento('');
+      setRemetente('');
+      setObservacoes('');
+      setPorteiroEntrada('');
+      setModoEdicao(false);
+      setCurrentEncomendaId(undefined);
+      router.setParams({ id: '' });
+    }
+
     setCameraVisible(false);
-    setCodigoBarra(data);
+    setScanned(false);
   };
 
   const handleLimparForm = () => {
@@ -307,6 +382,19 @@ export default function ScannerScreen() {
     }
     setLoading(true);
     try {
+      const { data: existente } = await supabase
+        .from('encomendas')
+        .select('id')
+        .eq('qr_code', codigoBarra)
+        .eq('condominio_id', perfil.condominio_id)
+        .maybeSingle();
+
+      if (existente) {
+        Alert.alert('Atenção', 'Já existe uma encomenda com este código. Faça a entrega na tela de edição.');
+        setLoading(false);
+        return;
+      }
+
       const { error } = await supabase.from('encomendas').insert({
         qr_code: codigoBarra,
         destinatario: destinatario.toUpperCase().trim(),
@@ -334,7 +422,7 @@ export default function ScannerScreen() {
   };
 
   const handleSalvarEdicao = async () => {
-    if (!encomendaId) return;
+    if (!currentEncomendaId) return;
     setLoading(true);
     try {
       const { error } = await supabase.from('encomendas').update({
@@ -345,7 +433,7 @@ export default function ScannerScreen() {
         remetente: remetente.toUpperCase().trim(),
         observacoes: observacoes.trim(),
         porteiro_entrada: porteiroEntrada.toUpperCase().trim() || 'Não informado',
-      }).eq('encomendas_id', encomendaId);
+      }).eq('encomendas_id', currentEncomendaId);
 
       if (error) throw error;
 
@@ -353,8 +441,9 @@ export default function ScannerScreen() {
       await salvarPorteiroNaLista(porteiroEntrada);
       await salvarRemetenteNaLista(remetente);
 
-      Alert.alert('Sucesso', 'Encomenda atualizada!');
-      setModoEdicao(false);
+      Alert.alert('Sucesso', 'Encomenda atualizada!', [
+        { text: 'OK', onPress: () => handleLimparForm() }
+      ]);
     } catch (err: any) {
       Alert.alert('Erro', err.message);
     } finally {
@@ -364,17 +453,17 @@ export default function ScannerScreen() {
 
   // ---------- ENTREGA ----------
   const handleEfetuarEntrega = async (signature: string, nomeRecebedor: string, porteiroEntrega: string) => {
-    if (!encomendaId) return;
+    if (!currentEncomendaId) return;
     setLoading(true);
     try {
       const { data: encomenda, error: fetchError } = await supabase
         .from('encomendas')
         .select('*')
-        .eq('encomendas_id', encomendaId)
+        .eq('encomendas_id', currentEncomendaId)
         .single();
       if (fetchError || !encomenda) throw new Error('Encomenda não encontrada');
 
-      const fileName = `assinaturas/sig_${encomendaId}_${Date.now()}.png`;
+      const fileName = `assinaturas/sig_${currentEncomendaId}_${Date.now()}.png`;
       const { error: uploadError } = await supabase.storage
         .from('assinaturas')
         .upload(fileName, decode(signature.replace('data:image/png;base64,', '')), {
@@ -404,7 +493,7 @@ export default function ScannerScreen() {
       const { error: deleteError } = await supabase
         .from('encomendas')
         .delete()
-        .eq('encomendas_id', encomendaId);
+        .eq('encomendas_id', currentEncomendaId);
       if (deleteError) throw deleteError;
 
       setSavedSignature(urlData.publicUrl);
@@ -481,7 +570,7 @@ export default function ScannerScreen() {
     return <View style={styles.loadingCenter}><ActivityIndicator size="large" color="#1974f4" /></View>;
   }
 
-  const isVisualizacao = !!encomendaId;
+  const isVisualizacao = !!currentEncomendaId;
   const campoEditavel = (!isVisualizacao || modoEdicao) && perfil?.tipo_usuario !== 'morador';
   const podeEntregar = isVisualizacao && !isReadOnly && perfil?.tipo_usuario !== 'morador';
 
@@ -569,6 +658,7 @@ export default function ScannerScreen() {
               }}
               onSelectSuggestion={handleSelectDestinatario}
               containerStyle={{ zIndex: 100 }}
+              editable={campoEditavel}
             />
 
             <View style={styles.gridRow}>
@@ -608,6 +698,7 @@ export default function ScannerScreen() {
                 setSugestoesRemetentes([]);
               }}
               containerStyle={{ zIndex: 80 }}
+              editable={campoEditavel}
             />
 
             <Text style={styles.label}>OBSERVAÇÕES</Text>
@@ -634,6 +725,7 @@ export default function ScannerScreen() {
                 setSugestoesPorteiros([]);
               }}
               containerStyle={{ zIndex: 60 }}
+              editable={campoEditavel}
             />
 
             {!isVisualizacao && (
@@ -702,200 +794,32 @@ const styles = StyleSheet.create({
   btnEditar: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, borderWidth: 1.5, borderColor: '#1974f4', backgroundColor: '#eff6ff' },
   btnEditarAtivo: { borderColor: '#ef4444', backgroundColor: '#fff1f2' },
   btnEditarText: { fontSize: 12, fontWeight: 'bold', color: '#1974f4' },
-
   formCard: { backgroundColor: '#fff', borderRadius: 16, padding: 20, elevation: 3 },
-
-  // === ESTILOS DE LABEL E INPUT PADRONIZADOS ===
-  label: { 
-    fontSize: 12, 
-    fontWeight: 'bold', 
-    color: '#1a1b1c', 
-    marginBottom: 8, 
-    marginTop: 8  // espaçamento vertical consistente
-  },
-
-  input: { 
-    backgroundColor: '#f8fafc', 
-    borderWidth: 1, 
-    borderColor: '#2f3134', 
-    borderRadius: 10, 
-    paddingHorizontal: 14, 
-    height: 50, 
-    fontSize: 15, 
-    color: '#0f172a',
-    marginBottom: 8 // espaço entre inputs
-  },
-
-  disabledInput: { 
-    backgroundColor: '#e2e8f0', 
-    borderColor: '#2f3134', 
-    color: '#475569' 
-  },
-
-  inputRow: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    gap: 10,
-    marginBottom: 8
-  },
-
-  scanButton: { 
-    backgroundColor: '#1974f4', 
-    width: 48, 
-    height: 48, 
-    borderRadius: 10, 
-    justifyContent: 'center', 
-    alignItems: 'center' 
-  },
-
-  gridRow: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between',
-    gap: 12
-  },
-
-  textArea: { 
-    height: 80, 
-    paddingTop: 14, 
-    textAlignVertical: 'top',
-    marginBottom: 8
-  },
-
-  acoesRow: { 
-    flexDirection: 'row', 
-    gap: 10, 
-    marginTop: 25 
-  },
-
-  btnSalvar: { 
-    backgroundColor: '#1974f4', 
-    height: 52, 
-    borderRadius: 10, 
-    flexDirection: 'row', 
-    justifyContent: 'center', 
-    alignItems: 'center', 
-    gap: 10, 
-    marginTop: 25, 
-    elevation: 3 
-  },
-
-  btnSalvarText: { 
-    color: '#fff', 
-    fontWeight: 'bold', 
-    fontSize: 15 
-  },
-
-  btnExcluir: { 
-    width: 52, 
-    height: 52, 
-    borderRadius: 10, 
-    justifyContent: 'center', 
-    alignItems: 'center', 
-    backgroundColor: '#fff1f2', 
-    borderWidth: 1.5, 
-    borderColor: '#fca5a5' 
-  },
-
-  cameraContainer: { 
-    flex: 1, 
-    backgroundColor: '#000', 
-    justifyContent: 'flex-end', 
-    alignItems: 'center' 
-  },
-
-  closeCameraBtn: { 
-    marginBottom: 40, 
-    backgroundColor: 'rgba(229, 23, 23, 0.86)', 
-    borderRadius: 30, 
-    padding: 2 
-  },
-
-  // =================== ESTILOS DO COMPROVANTE ===================
-  receiptContainer: { 
-    backgroundColor: '#fff', 
-    padding: 20, 
-    borderRadius: 20, 
-    alignItems: 'center', 
-    elevation: 5 
-  },
-
-  receiptTitle: { 
-    fontSize: 22, 
-    fontWeight: 'bold', 
-    marginVertical: 10, 
-    color: '#10B981' 
-  },
-
-  receiptSection: { 
-    width: '100%', 
-    marginTop: 10 
-  },
-
-  receiptDataCard: { 
-    borderLeftWidth: 4, 
-    borderLeftColor: '#1974f4', 
-    paddingLeft: 15, 
-    paddingVertical: 5 
-  },
-
-  receiptLabel: { 
-    fontSize: 10, 
-    fontWeight: 'bold', 
-    color: '#1974f4', 
-    marginBottom: 5 
-  },
-
-  receiptText: { 
-    fontSize: 14, 
-    color: '#334155', 
-    marginBottom: 2 
-  },
-
-  sigPreviewContainer: { 
-    width: '100%', 
-    alignItems: 'center', 
-    marginTop: 20 
-  },
-
-  sigLabel: { 
-    fontSize: 11, 
-    color: '#94a3b8', 
-    marginBottom: 5 
-  },
-
+  label: { fontSize: 12, fontWeight: 'bold', color: '#1a1b1c', marginBottom: 8, marginTop: 8 },
+  input: { backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#2f3134', borderRadius: 10, paddingHorizontal: 14, height: 50, fontSize: 15, color: '#0f172a', marginBottom: 8 },
+  disabledInput: { backgroundColor: '#e2e8f0', borderColor: '#2f3134', color: '#475569' },
+  inputRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
+  scanButton: { backgroundColor: '#1974f4', width: 48, height: 48, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
+  gridRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
+  textArea: { height: 80, paddingTop: 14, textAlignVertical: 'top', marginBottom: 8 },
+  acoesRow: { flexDirection: 'row', gap: 10, marginTop: 25 },
+  btnSalvar: { backgroundColor: '#1974f4', height: 52, borderRadius: 10, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 10, marginTop: 25, elevation: 3 },
+  btnSalvarText: { color: '#fff', fontWeight: 'bold', fontSize: 15 },
+  btnExcluir: { width: 52, height: 52, borderRadius: 10, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff1f2', borderWidth: 1.5, borderColor: '#fca5a5' },
+  cameraContainer: { flex: 1, backgroundColor: '#000', justifyContent: 'flex-end', alignItems: 'center' },
+  closeCameraBtn: { marginBottom: 40, backgroundColor: 'rgba(229,23,23,0.86)', borderRadius: 30, padding: 2 },
+  receiptContainer: { backgroundColor: '#fff', padding: 20, borderRadius: 20, alignItems: 'center', elevation: 5 },
+  receiptTitle: { fontSize: 22, fontWeight: 'bold', marginVertical: 10, color: '#10B981' },
+  receiptSection: { width: '100%', marginTop: 10 },
+  receiptDataCard: { borderLeftWidth: 4, borderLeftColor: '#1974f4', paddingLeft: 15, paddingVertical: 5 },
+  receiptLabel: { fontSize: 10, fontWeight: 'bold', color: '#1974f4', marginBottom: 5 },
+  receiptText: { fontSize: 14, color: '#334155', marginBottom: 2 },
+  sigPreviewContainer: { width: '100%', alignItems: 'center', marginTop: 20 },
+  sigLabel: { fontSize: 11, color: '#94a3b8', marginBottom: 5 },
   bold: { fontWeight: 'bold' },
-
-  receiptSig: { 
-    width: '100%', 
-    height: 120, 
-    backgroundColor: '#f1f5f9', 
-    borderRadius: 10 
-  },
-
-  pdfBtn: {
-    backgroundColor: '#ef4444',
-    padding: 15,
-    borderRadius: 12,
-    width: '100%',
-    alignItems: 'center',
-    marginTop: 25,
-    flexDirection: 'row',
-    justifyContent: 'center',
-  },
-
-  btnTxt: { 
-    color: '#fff', 
-    fontWeight: 'bold', 
-    fontSize: 15 
-  },
-
-  btnNew: { 
-    marginTop: 15, 
-    padding: 10 
-  },
-
-  btnNewTxt: { 
-    color: '#1974f4', 
-    fontWeight: 'bold' 
-  },
+  receiptSig: { width: '100%', height: 120, backgroundColor: '#f1f5f9', borderRadius: 10 },
+  pdfBtn: { backgroundColor: '#ef4444', padding: 15, borderRadius: 12, width: '100%', alignItems: 'center', marginTop: 25, flexDirection: 'row', justifyContent: 'center' },
+  btnTxt: { color: '#fff', fontWeight: 'bold', fontSize: 15 },
+  btnNew: { marginTop: 15, padding: 10 },
+  btnNewTxt: { color: '#1974f4', fontWeight: 'bold' },
 });

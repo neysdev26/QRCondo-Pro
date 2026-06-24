@@ -263,12 +263,12 @@ export default function HistoricoScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#ced5df' },
+  container: { flex: 1, backgroundColor: '#d1dfce' },
   header: { padding: 20, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#e2e8f0' },
   title: { fontSize: 22, fontWeight: 'bold', marginBottom: 10, color: '#0f172a' },
   searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f1f5f9', borderRadius: 8, paddingHorizontal: 10, height: 50, borderWidth: 1, borderColor: '#e2e8f0' },
   searchInput: { flex: 1, marginLeft: 8, fontSize: 16, color: '#0f172a' },
-  cardWrapper: { backgroundColor: '#fff', padding: 15, marginHorizontal: 16, marginTop: 12, borderRadius: 10, elevation: 3, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 5, borderLeftWidth: 5, borderLeftColor: '#10b981' },
+  cardWrapper: { backgroundColor: '#a1eca4', padding: 15, marginHorizontal: 16, marginTop: 12, borderRadius: 10, elevation: 3, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 5, borderLeftWidth: 5, borderLeftColor: '#10b981' },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   statusBadge: { backgroundColor: '#d1fae5', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 5 },
   statusBadgeText: { fontSize: 11, fontWeight: 'bold', color: '#065f46' },
