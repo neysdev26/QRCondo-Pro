@@ -1,31 +1,28 @@
+// types/index.ts
+// Definições de tipos para o aplicativo QrCondo Pro
+
 export interface Encomenda {
-  id: number;
-  qr_code: string; 
+  id: number | string;
+  qr_code: string;
   destinatario: string;
-  bloco?: string;
-  apartamento: string | number;
+  bloco: string;
+  apartamento: string;
   remetente?: string;
-  porteiro: string;
   observacoes?: string;
+  porteiro_entrada?: string;    // nome do porteiro que registrou a entrada
+  porteiro_entrega?: string;    // nome do porteiro que fez a entrega
+  nome_recebedor?: string;      // nome de quem retirou
+  assinatura?: string;          // URL da imagem da assinatura
   status: 'pendente' | 'retirada';
   data_chegada: string;
   data_retirada?: string;
-  quem_retirou?: string;    // O PDF chama de nomeRecebedor, vamos padronizar
-  porteiro_entrega?: string;
-  assinatura?: string;
+  condominio_id?: number;
 }
 
-// ESTA INTERFACE É O QUE ESTÁ FALTANDO NO SEU ARQUIVO
 export interface EncomendaContextType {
   encomendas: Encomenda[];
-  loading: boolean;
-  refreshEncomendas: () => Promise<void>;
-  addEncomenda: (encomenda: Encomenda) => Promise<void>;
-  updateEncomenda: (id: string, dados: Partial<Encomenda>) => Promise<void>;
-  deleteEncomenda: (id: string) => Promise<void>;
-  // Adicione estas se o seu contexto as utilizar:
-  syncStatus?: 'synced' | 'syncing' | 'error';
-  pendingOpsCount?: number;
+  isLoading: boolean;
+  fetchEncomendas: () => void;
 }
 
 export interface Bloco {
@@ -41,3 +38,23 @@ export interface BackupData {
 }
 
 export type EncomendaStatus = 'pendente' | 'retirada';
+
+// Tipos relacionados ao perfil do usuário (usado em AuthContext)
+export interface PerfilUsuario {
+  id: string;
+  condominio_id: number;
+  nome: string;
+  tipo_usuario: 'porteiro' | 'morador';
+  apartamento?: string;
+  bloco?: string;
+}
+
+// Tipo para o contexto de autenticação
+export interface AuthContextData {
+  session: any; // Ou importe Session do Supabase se preferir
+  user: any;
+  perfil: PerfilUsuario | null;
+  isLoading: boolean;
+  signIn: (email: string, password: string) => Promise<void>;
+  signOut: () => Promise<void>;
+}

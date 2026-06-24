@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "QrCondo App",
-    "slug": "qrcondo-app",
-    "version": "1.0.25",
+    "name": "QRCondo Pro App",
+    "slug": "qrcondo-pro-app",
+    "version": "1.0.26",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "encomendas",
@@ -13,10 +13,10 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.neysdev.qrcondo"
+      "bundleIdentifier": "com.neysdev.qrcondopro"
     },
     "android": {
-      "package": "com.neysdev.qrcondo",
+      "package": "com.neysdev.qrcondo_pro",
       "versionCode": 3,
       "backgroundColor": "#2E7D32",
       "adaptiveIcon": {
@@ -42,11 +42,13 @@
         {
           "contactsPermission": "Permitimos o acesso para localizar moradores pelo Bloco/Apto."
         }
-      ]
+      ],
+      "expo-audio",
+      "expo-video"
     ],
     "extra": {
       "eas": {
-        "projectId": "60eda0c5-a07e-4683-8112-b330c05feff3"
+        "projectId": "d5036cf9-a86a-4f9d-bd33-844ab5c67d43"
       },
       "router": {}
     }

@@ -1,48 +1,56 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from './AuthContext';
 import { Encomenda } from '../types';
 
-interface EncomendaContextType {
+type EncomendaContextData = {
   encomendas: Encomenda[];
   isLoading: boolean;
-  fetchEncomendas: () => Promise<void>;
-}
+  fetchEncomendas: () => void;
+};
 
-const EncomendaContext = createContext<EncomendaContextType | undefined>(undefined);
+const EncomendaContext = createContext<EncomendaContextData>({} as EncomendaContextData);
 
-export function EncomendaProvider({ children }: { children: React.ReactNode }) {
+export const EncomendaProvider = ({ children }: { children: React.ReactNode }) => {
   const [encomendas, setEncomendas] = useState<Encomenda[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const { perfil } = useAuth();
 
-  
-const fetchEncomendas = useCallback(async () => {
-  setIsLoading(true);
-  try {
-    const { data, error } = await supabase
-      .from('encomendas')
-      .select('*')
-      // Buscamos registros que estejam pendentes OU retirados
-      .in('status', ['pendente', 'retirada']) 
-      .order('data_chegada', { ascending: false });
+  const fetchEncomendas = async () => {
+    if (!perfil) return;
+    setIsLoading(true);
+    try {
+      let query = supabase
+        .from('encomendas')
+        .select('*')
+        .eq('condominio_id', perfil.condominio_id)
+        .neq('status', 'retirada'); // apenas pendentes
 
-    if (error) throw error;
-    setEncomendas(data || []);
-  } catch (error) {
-    console.error('Erro ao buscar encomendas:', error);
-  } finally {
-    setIsLoading(false);
-  }
-}, []);
+      if (perfil.tipo_usuario === 'morador') {
+        query = query
+          .eq('apartamento', perfil.apartamento)
+          .eq('bloco', perfil.bloco);
+      }
+
+      const { data, error } = await query.order('data_chegada', { ascending: false });
+      if (error) throw error;
+      setEncomendas(data || []);
+    } catch (error) {
+      console.error('Erro ao buscar encomendas:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (perfil) fetchEncomendas();
+  }, [perfil]);
 
   return (
     <EncomendaContext.Provider value={{ encomendas, isLoading, fetchEncomendas }}>
       {children}
     </EncomendaContext.Provider>
   );
-}
+};
 
-export function useEncomenda() {
-  const context = useContext(EncomendaContext);
-  if (!context) throw new Error('useEncomenda deve ser usado dentro de um EncomendaProvider');
-  return context;
-}
+export const useEncomenda = () => useContext(EncomendaContext);

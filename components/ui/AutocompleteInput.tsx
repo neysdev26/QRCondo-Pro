@@ -9,7 +9,7 @@ interface AutocompleteProps {
   onSelectSuggestion: (item: string) => void;
   suggestions: string[];
   placeholder?: string;
-  containerStyle?: object; // Usaremos isto para passar o zIndex
+  containerStyle?: object;
 }
 
 export default function AutocompleteInput({ 
@@ -17,7 +17,7 @@ export default function AutocompleteInput({
 }: AutocompleteProps) {
   const [showSuggestions, setShowSuggestions] = useState(false);
 
-  // O filtro agora apenas garante que não mostramos a sugestão se for idêntica ao que já está escrito
+  // Filtra sugestões que não são iguais ao valor atual
   const filtered = suggestions.filter(item => item && item !== value);
 
   return (
@@ -26,9 +26,8 @@ export default function AutocompleteInput({
       <TextInput
         style={styles.input}
         value={value}
-        onChangeText={(t) => { onChangeText(t); setShowSuggestions(true); }}
+        onChangeText={(t: string) => { onChangeText(t); setShowSuggestions(true); }} // 👈 tipagem adicionada
         onFocus={() => setShowSuggestions(true)}
-        // O delay no onBlur é essencial para permitir o clique na sugestão
         onBlur={() => setTimeout(() => setShowSuggestions(false), 250)}
         placeholder={placeholder}
       />
@@ -57,11 +56,10 @@ const styles = StyleSheet.create({
   container: { 
     marginBottom: 15, 
     position: 'relative',
-    // O zIndex aqui será controlado pelo pai via containerStyle
   },
   label: { fontSize: 14, fontWeight: '600', marginBottom: 6, color: COLORS.text },
   input: { 
-    borderWidth: 3, // Mantendo o seu estilo de borda grossa do scanner
+    borderWidth: 3,
     borderColor: '#d6d9dd', 
     borderRadius: 10, 
     padding: 12, 
@@ -70,15 +68,15 @@ const styles = StyleSheet.create({
   },
   suggestionList: { 
     position: 'absolute', 
-    top: 78, // Ajustado para ficar logo abaixo do input
+    top: 78,
     left: 0, 
     right: 0, 
     backgroundColor: '#FFF', 
     borderRadius: 10, 
     borderWidth: 1, 
     borderColor: '#DDD', 
-    elevation: 10, // Garante que flutue no Android
-    zIndex: 9999, // Garante que flutue no iOS
+    elevation: 10,
+    zIndex: 9999,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,

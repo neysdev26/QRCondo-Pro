@@ -1,4 +1,4 @@
-package com.neysdev.qrcondo
+package com.neysdev.qrcondo_pro
 
 import android.app.Application
 import android.content.res.Configuration
