@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 
 export type PerfilUsuario = {
   id: string;
-  condominio_id: number;
+  condominio_id: string; // UUID
   nome: string;
   tipo_usuario: 'porteiro' | 'morador';
   apartamento?: string;
@@ -71,21 +71,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   async function carregarPerfil(userId: string) {
-    try {
-      const { data, error } = await supabase
-        .from('perfis_usuarios')
-        .select('*')
-        .eq('id', userId)
-        .maybeSingle(); // 🔥 importante: não lança erro se não encontrar
-      if (error) throw error;
-      setPerfil(data || null);
-    } catch (error) {
-      console.error('Erro ao carregar perfil:', error);
-      setPerfil(null);
-    } finally {
-      setIsLoading(false);
+  try {
+    const { data, error } = await supabase
+      .from('perfis_usuarios')
+      .select('*')
+      .eq('id', userId)
+      .maybeSingle();
+    if (error) throw error;
+    if (data) {
+      setPerfil(data as PerfilUsuario);
     }
+  } catch (error) {
+    console.error('Erro ao carregar perfil:', error);
+    setPerfil(null);
+  } finally {
+    setIsLoading(false);
   }
+}
 
   async function signIn(email: string, password: string) {
     const { error } = await supabase.auth.signInWithPassword({ email, password });

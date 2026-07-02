@@ -1,9 +1,10 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { RefreshControl } from 'react-native-gesture-handler';
 import { supabase } from '../../lib/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -14,22 +15,49 @@ export default function DashboardScreen() {
   const [encomendas, setEncomendas] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  
+  const [condominioNome, setCondominioNome] = useState('Carregando...');
+
   const [dbStats, setDbStats] = useState({
     chegados_hoje: 0,
     pendentes_total: 0,
     entregues_hoje: 0
   });
 
-  const fetchStats = async () => {
+  const buscarNomeCondominio = useCallback(async () => {
+    if (!perfil || !perfil.condominio_id) return;
+    try {
+      const { data, error } = await supabase
+        .from('condominios')
+        .select('nome')
+        .eq('uuid', perfil.condominio_id)
+        .maybeSingle();
+      if (error) {
+        console.error('❌ Erro ao buscar condomínio:', error);
+        setCondominioNome('Erro ao carregar');
+        return;
+      }
+      if (data) {
+        setCondominioNome(data.nome);
+      } else {
+        setCondominioNome('Condomínio não encontrado');
+      }
+    } catch (err) {
+      console.error('💥 Erro inesperado ao buscar condomínio:', err);
+      setCondominioNome('Erro');
+    }
+  }, [perfil]);
+
+  const fetchStats = useCallback(async (showLoading = true) => {
     if (!perfil || !perfil.condominio_id) {
       setLoading(false);
       setRefreshing(false);
       return;
     }
-    
-    setLoading(true);
+
+    if (showLoading) setLoading(true);
     try {
+      await buscarNomeCondominio();
+
       if (perfil.tipo_usuario === 'porteiro') {
         const { data: statsData, error: statsError } = await supabase
           .from('dashboard_stats')
@@ -38,7 +66,8 @@ export default function DashboardScreen() {
           .maybeSingle();
         if (statsData && !statsError) setDbStats(statsData);
       } else {
-        // Morador: consultas manuais
+        const hojeIso = new Date().toISOString().split('T')[0];
+
         const { count: pendentesCount } = await supabase
           .from('encomendas')
           .select('encomendas_id', { count: 'exact', head: true })
@@ -46,8 +75,6 @@ export default function DashboardScreen() {
           .eq('apartamento', perfil.apartamento)
           .eq('bloco', perfil.bloco)
           .eq('status', 'pendente');
-
-        const hojeIso = new Date().toISOString().split('T')[0];
 
         const { count: chegadosCount } = await supabase
           .from('encomendas')
@@ -72,10 +99,9 @@ export default function DashboardScreen() {
         });
       }
 
-      // Buscar entradas recentes (limit 5)
       let query = supabase
         .from('encomendas')
-        .select('encomendas_id, destinatario, apartamento, bloco, status, data_chegada, qr_code, remetente, observacoes, porteiro_entrada, porteiro_entrega')
+        .select('id, encomendas_id, destinatario, apartamento, bloco, status, data_chegada, qr_code, remetente, observacoes, porteiro_entrada, porteiro_entrega')
         .eq('condominio_id', perfil.condominio_id)
         .order('data_chegada', { ascending: false })
         .limit(5);
@@ -100,50 +126,37 @@ export default function DashboardScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [perfil, buscarNomeCondominio]);
+
+  // Atualiza silenciosamente ao voltar para a tela
+  useFocusEffect(
+    useCallback(() => {
+      if (perfil) fetchStats(false);
+    }, [perfil, fetchStats])
+  );
 
   useEffect(() => {
     if (!perfil) return;
-    fetchStats();
+    fetchStats(true);
 
     const channel = supabase
       .channel('db-monitor-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'encomendas' }, () => fetchStats())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'encomendas_historico' }, () => fetchStats())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'encomendas' }, () => fetchStats(false))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'encomendas_historico' }, () => fetchStats(false))
       .subscribe();
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
   }, [perfil]);
 
   const onRefresh = () => {
     setRefreshing(true);
-    fetchStats();
+    fetchStats(false);
   };
 
   const widgetsData = useMemo(() => [
-    { 
-      title: 'Chegaram Hoje', 
-      value: dbStats.chegados_hoje, 
-      icon: 'package-variant-closed', 
-      color: '#1974f4', 
-      bgColor: '#e8f2ff' 
-    },
-    { 
-      title: 'Aguardando Retirada', 
-      value: dbStats.pendentes_total, 
-      icon: 'clock-outline', 
-      color: '#b27b00', 
-      bgColor: '#fff9db' 
-    },
-    { 
-      title: 'Entregues Hoje', 
-      value: dbStats.entregues_hoje, 
-      icon: 'check-circle-outline', 
-      color: '#2b8a3e', 
-      bgColor: '#ebfbee' 
-    },
+    { title: 'Chegaram Hoje', value: dbStats.chegados_hoje, icon: 'package-variant-closed', color: '#1974f4', bgColor: '#e8f2ff' },
+    { title: 'Aguardando Retirada', value: dbStats.pendentes_total, icon: 'clock-outline', color: '#b27b00', bgColor: '#fff9db' },
+    { title: 'Entregues Hoje', value: dbStats.entregues_hoje, icon: 'check-circle-outline', color: '#2b8a3e', bgColor: '#ebfbee' },
   ], [dbStats]);
 
   if (loading && !refreshing) {
@@ -155,12 +168,11 @@ export default function DashboardScreen() {
   }
 
   return (
-    <ScrollView 
+    <ScrollView
       style={[styles.container, { paddingTop: insets.top }]}
       contentContainerStyle={{ paddingBottom: 30 }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
-      {/* CABEÇALHO */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <MaterialCommunityIcons name="office-building-marker" size={36} color="#1974f4" />
@@ -176,7 +188,17 @@ export default function DashboardScreen() {
         )}
       </View>
 
-      {/* WIDGETS */}
+      {perfil && (
+        <View style={styles.userInfoContainer}>
+          <Text style={styles.userName}>👤 {perfil.nome}</Text>
+          <Text style={styles.condominioName}>🏢 {condominioNome}</Text>
+          <Text style={styles.userRole}>
+            {perfil.tipo_usuario === 'porteiro' ? '🔑 Porteiro' : '🏠 Morador'}
+            {perfil.tipo_usuario === 'morador' && ` - Bloco ${perfil.bloco} - Apto ${perfil.apartamento}`}
+          </Text>
+        </View>
+      )}
+
       <View style={styles.widgetsGrid}>
         <View style={styles.widgetRow}>
           <View style={[styles.widgetCard, { backgroundColor: '#e8f2ff', flex: 1, marginRight: 8 }]}>
@@ -205,7 +227,6 @@ export default function DashboardScreen() {
         </View>
       </View>
 
-      {/* SEÇÃO DE ENTRADAS RECENTES – INDIVIDUALIZADAS */}
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>Entradas Recentes</Text>
         <TouchableOpacity onPress={() => router.push('/encomendas')}>
@@ -221,47 +242,34 @@ export default function DashboardScreen() {
           </View>
         ) : (
           encomendas.map((item, index) => (
-            <TouchableOpacity 
-              key={item.id || index} 
+            <TouchableOpacity
+              key={item.id || index}
               style={styles.listItemCard}
               activeOpacity={0.7}
               onPress={() => router.push({ pathname: '/scanner', params: { id: item.id } })}
             >
               <View style={styles.listItemLeft}>
-                <View style={[styles.statusIndicator, { 
-                  backgroundColor: item.status === 'pendente' ? '#f59e0b' : '#10b981' 
-                }]} />
+                <View style={[styles.statusIndicator, { backgroundColor: item.status === 'pendente' ? '#f59e0b' : '#10b981' }]} />
                 <View style={styles.listIconBox}>
-                  <MaterialCommunityIcons 
-                    name={item.status === 'pendente' ? 'clock-outline' : 'check-circle'} 
-                    size={24} 
-                    color={item.status === 'pendente' ? '#f59e0b' : '#10b981'} 
+                  <MaterialCommunityIcons
+                    name={item.status === 'pendente' ? 'clock-outline' : 'check-circle'}
+                    size={24}
+                    color={item.status === 'pendente' ? '#f59e0b' : '#10b981'}
                   />
                 </View>
               </View>
               <View style={styles.listInfo}>
                 <View style={styles.listRow}>
                   <Text style={styles.listDestinatario} numberOfLines={1}>{item.destinatario}</Text>
-                  <Text style={styles.listStatus}>
-                    {item.status === 'pendente' ? 'PENDENTE' : 'ENTREGUE'}
-                  </Text>
+                  <Text style={styles.listStatus}>{item.status === 'pendente' ? 'PENDENTE' : 'ENTREGUE'}</Text>
                 </View>
-                <Text style={styles.listSub}>
-                  Bloco {item.bloco} - Apto {item.apartamento}
-                </Text>
+                <Text style={styles.listSub}>Bloco {item.bloco} - Apto {item.apartamento}</Text>
                 <View style={styles.listMeta}>
                   <MaterialCommunityIcons name="clock-time-four-outline" size={14} color="#94a3b8" />
                   <Text style={styles.listDate}>
-                    {item.data_chegada 
-                      ? new Date(item.data_chegada).toLocaleString('pt-BR', { 
-                          day: '2-digit', 
-                          month: '2-digit', 
-                          year: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit'
-                        })
-                      : ''
-                    }
+                    {item.data_chegada
+                      ? new Date(item.data_chegada).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                      : ''}
                   </Text>
                   {item.remetente && (
                     <>
@@ -281,201 +289,48 @@ export default function DashboardScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#edeff2', paddingHorizontal: 20 },
+  container: { flex: 1, backgroundColor: '#ced5df', paddingHorizontal: 20 },
   loadingCenter: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#ced5df' },
-
-  // Cabeçalho
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 16,
-    marginBottom: 24,
-  },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  headerTitles: {
-    flexDirection: 'column',
-  },
-  appName: {
-    fontSize: 26,
-    fontWeight: 'bold',
-    color: '#1974f4',
-    letterSpacing: 0.5,
-  },
-  appTagline: {
-    fontSize: 12,
-    color: '#64748b',
-    marginTop: 2,
-  },
-  userBadge: {
-    backgroundColor: '#1974f4',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-  },
-  userBadgeText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 13,
-  },
-
-  // Widgets
-  widgetsGrid: {
-    gap: 12,
-    marginBottom: 8,
-  },
-  widgetRow: {
-    flexDirection: 'row',
-    gap: 16,
-  },
-  widgetCard: {
-    borderRadius: 16,
-    padding: 16,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 2,
-  },
-  widgetHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  widgetTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  widgetValue: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    marginTop: 8,
-  },
-
-  // Seção e lista
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 20,
-    marginBottom: 12,
-  },
-  sectionTitle: {
-    fontSize: 17,
-    fontWeight: 'bold',
-    color: '#0f172a',
-  },
-  seeAll: {
-    color: '#1974f4',
-    fontWeight: 'bold',
-    fontSize: 14,
-  },
-  listContainer: {
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, marginBottom: 24 },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  headerTitles: { flexDirection: 'column' },
+  appName: { fontSize: 26, fontWeight: 'bold', color: '#1974f4', letterSpacing: 0.5 },
+  appTagline: { fontSize: 12, color: '#64748b', marginTop: 2 },
+  userBadge: { backgroundColor: '#1974f4', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
+  userBadgeText: { color: '#fff', fontWeight: 'bold', fontSize: 13 },
+  userInfoContainer: {
     backgroundColor: '#fff',
-    borderRadius: 16,
-    paddingVertical: 8,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 2,
-  },
-
-  // Card individual
-  listItemCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    marginHorizontal: 8,
-    marginVertical: 4,
+    padding: 14,
     borderRadius: 12,
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#f1f5f9',
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 2,
-  },
-  listItemLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  statusIndicator: {
-    width: 4,
-    height: 40,
-    borderRadius: 2,
-    marginRight: 8,
-  },
-  listIconBox: {
-    backgroundColor: '#f8fafc',
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
+    marginBottom: 16,
     borderWidth: 1,
     borderColor: '#e2e8f0',
   },
-  listInfo: {
-    flex: 1,
-  },
-  listRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  listDestinatario: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#1e293b',
-    flex: 1,
-    marginRight: 8,
-  },
-  listStatus: {
-    fontSize: 10,
-    fontWeight: 'bold',
-    color: '#64748b',
-    backgroundColor: '#f1f5f9',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  listSub: {
-    fontSize: 14,
-    color: '#64748b',
-    marginTop: 2,
-  },
-  listMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 6,
-    gap: 4,
-  },
-  listDate: {
-    fontSize: 12,
-    color: '#94a3b8',
-  },
-  listRemetente: {
-    fontSize: 12,
-    color: '#94a3b8',
-    flex: 1,
-  },
-  emptyContainer: {
-    padding: 30,
-    alignItems: 'center',
-    gap: 12,
-  },
-  emptyText: {
-    color: '#64748b',
-    fontSize: 13,
-    textAlign: 'center',
-  },
+  userName: { fontSize: 16, fontWeight: 'bold', color: '#0f172a', marginBottom: 2 },
+  condominioName: { fontSize: 14, color: '#1e293b', marginBottom: 2 },
+  userRole: { fontSize: 13, color: '#64748b' },
+  widgetsGrid: { gap: 12, marginBottom: 8 },
+  widgetRow: { flexDirection: 'row', gap: 16 },
+  widgetCard: { borderRadius: 16, padding: 16, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 2 },
+  widgetHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  widgetTitle: { fontSize: 14, fontWeight: '600' },
+  widgetValue: { fontSize: 28, fontWeight: 'bold', marginTop: 8 },
+  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 20, marginBottom: 12 },
+  sectionTitle: { fontSize: 17, fontWeight: 'bold', color: '#0f172a' },
+  seeAll: { color: '#1974f4', fontWeight: 'bold', fontSize: 14 },
+  listContainer: { backgroundColor: '#fff', borderRadius: 16, paddingVertical: 8, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 2 },
+  listItemCard: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 16, marginHorizontal: 8, marginVertical: 4, borderRadius: 12, backgroundColor: '#fff', borderWidth: 1, borderColor: '#f1f5f9', elevation: 1, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 2 },
+  listItemLeft: { flexDirection: 'row', alignItems: 'center', marginRight: 12 },
+  statusIndicator: { width: 4, height: 40, borderRadius: 2, marginRight: 8 },
+  listIconBox: { backgroundColor: '#f8fafc', width: 44, height: 44, borderRadius: 12, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#e2e8f0' },
+  listInfo: { flex: 1 },
+  listRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  listDestinatario: { fontSize: 16, fontWeight: 'bold', color: '#1e293b', flex: 1, marginRight: 8 },
+  listStatus: { fontSize: 10, fontWeight: 'bold', color: '#64748b', backgroundColor: '#f1f5f9', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 },
+  listSub: { fontSize: 14, color: '#64748b', marginTop: 2 },
+  listMeta: { flexDirection: 'row', alignItems: 'center', marginTop: 6, gap: 4 },
+  listDate: { fontSize: 12, color: '#94a3b8' },
+  listRemetente: { fontSize: 12, color: '#94a3b8', flex: 1 },
+  emptyContainer: { padding: 30, alignItems: 'center', gap: 12 },
+  emptyText: { color: '#64748b', fontSize: 13, textAlign: 'center' },
 });

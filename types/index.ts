@@ -2,21 +2,22 @@
 // Definições de tipos para o aplicativo QrCondo Pro
 
 export interface Encomenda {
-  id: number | string;
+  id: string;
+  encomendas_id?: string;
   qr_code: string;
   destinatario: string;
   bloco: string;
   apartamento: string;
   remetente?: string;
   observacoes?: string;
-  porteiro_entrada?: string;    // nome do porteiro que registrou a entrada
-  porteiro_entrega?: string;    // nome do porteiro que fez a entrega
-  nome_recebedor?: string;      // nome de quem retirou
-  assinatura?: string;          // URL da imagem da assinatura
+  porteiro_entrada?: string;
+  porteiro_entrega?: string;
+  nome_recebedor?: string;
+  assinatura?: string;
   status: 'pendente' | 'retirada';
   data_chegada: string;
   data_retirada?: string;
-  condominio_id?: number;
+  condominio_id?: string;
 }
 
 export interface EncomendaContextType {
@@ -39,19 +40,17 @@ export interface BackupData {
 
 export type EncomendaStatus = 'pendente' | 'retirada';
 
-// Tipos relacionados ao perfil do usuário (usado em AuthContext)
 export interface PerfilUsuario {
   id: string;
-  condominio_id: number;
+  condominio_id: string;
   nome: string;
   tipo_usuario: 'porteiro' | 'morador';
   apartamento?: string;
   bloco?: string;
 }
 
-// Tipo para o contexto de autenticação
 export interface AuthContextData {
-  session: any; // Ou importe Session do Supabase se preferir
+  session: any;
   user: any;
   perfil: PerfilUsuario | null;
   isLoading: boolean;

@@ -2,7 +2,7 @@
   "expo": {
     "name": "QRCondo Pro App",
     "slug": "qrcondo-pro-app",
-    "version": "1.0.26",
+    "version": "1.0.28",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "encomendas",
@@ -29,7 +29,8 @@
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.READ_CONTACTS",
-        "android.permission.WRITE_CONTACTS"
+        "android.permission.WRITE_CONTACTS",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
       ]
     },
     "plugins": [
@@ -48,7 +49,7 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "d5036cf9-a86a-4f9d-bd33-844ab5c67d43"
+        "projectId": "cfaceb45-5ba8-4a9c-9951-b0dcc129a92c"
       },
       "router": {}
     }

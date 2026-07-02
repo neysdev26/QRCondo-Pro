@@ -34,7 +34,7 @@ export default function CadastroUsuarioScreen() {
       const campoChave = tipoUsuario === 'porteiro' ? 'chave_porteiro' : 'chave_morador';
       const { data: condominio, error: chaveError } = await supabase
         .from('condominios')
-        .select('id')
+        .select('id, uuid')
         .eq(campoChave, chaveAcesso.trim())
         .maybeSingle();
 
@@ -56,7 +56,7 @@ export default function CadastroUsuarioScreen() {
       // 3. Inserir perfil
       const { error: profileError } = await supabase.from('perfis_usuarios').insert({
         id: authData.user.id,
-        condominio_id: condominio.id,
+        condominio_id: condominio.uuid,
         nome: nome.trim(),
         tipo_usuario: tipoUsuario,
         bloco: tipoUsuario === 'morador' ? bloco.trim() : null,

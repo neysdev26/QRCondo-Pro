@@ -1,7 +1,7 @@
 {
   "name": "qrcondo-app",
   "main": "expo-router/entry",
-  "version": "1.0.26",
+  "version": "1.0.28",
   "scripts": {
     "start": "expo start",
     "bump": "npm version patch --no-git-tag-version && node sync-version.js",
@@ -50,7 +50,7 @@
     "expo": "~53.0.27",
     "expo-application": "~6.1.4",
     "expo-asset": "~11.1.5",
-    "expo-audio": "~0.4.9",
+    "expo-audio": "^0.4.9",
     "expo-auth-session": "~6.2.1",
     "expo-av": "~15.1.7",
     "expo-blur": "~14.1.4",

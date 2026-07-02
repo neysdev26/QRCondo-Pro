@@ -223,7 +223,7 @@ export default function ScannerScreen() {
         }
 
         let registro: any = null;
-        const { data: enc } = await supabase.from('encomendas').select('*').eq('encomendas_id', currentEncomendaId).maybeSingle();
+        const { data: enc } = await supabase.from('encomendas').select('*').eq('id', currentEncomendaId).maybeSingle();
         if (enc) {
           registro = enc;
         } else {
@@ -330,8 +330,8 @@ export default function ScannerScreen() {
         data_retirada: encomendaExistente.data_retirada || '',
       });
 
-      // Usa encomendas_id (chave primária da tabela) para isVisualizacao funcionar corretamente
-      const idEncomenda = encomendaExistente.encomendas_id || encomendaExistente.id;
+      // 🔹 USAR SEMPRE O 'id' (PK), NÃO 'encomendas_id'
+      const idEncomenda = encomendaExistente.id;
       setCurrentEncomendaId(idEncomenda);
       router.setParams({ id: idEncomenda });
 
@@ -342,7 +342,7 @@ export default function ScannerScreen() {
       if (jaEntregue) {
         Alert.alert('📦 Encomenda já entregue', `Esta encomenda de ${encomendaExistente.destinatario} já foi retirada.`);
       } else {
-        Alert.alert('✅ Encomenda encontrada', `Registro de ${encomendaExistente.destinatario} carregado. Clique em "REALIZAR ENTREGA" para finalizar.`);
+        Alert.alert('✅ Encomenda encontrada', `Registro de ${encomendaExistente.destinatario} carregado.`);
       }
     } else {
       setCodigoBarra(data);
@@ -380,6 +380,9 @@ export default function ScannerScreen() {
       Alert.alert('Atenção', 'Preencha destinatário e apartamento.');
       return;
     }
+
+    console.log('📝 porteiroEntrada:', porteiroEntrada);
+
     setLoading(true);
     try {
       const { data: existente } = await supabase
@@ -395,7 +398,7 @@ export default function ScannerScreen() {
         return;
       }
 
-      const { error } = await supabase.from('encomendas').insert({
+      const dataFinal = {
         qr_code: codigoBarra,
         destinatario: destinatario.toUpperCase().trim(),
         bloco: bloco.toUpperCase().trim(),
@@ -405,7 +408,9 @@ export default function ScannerScreen() {
         condominio_id: perfil.condominio_id,
         porteiro_entrada: porteiroEntrada.toUpperCase().trim() || 'Não informado',
         status: 'pendente',
-      });
+      };
+
+      const { error } = await supabase.from('encomendas').insert(dataFinal);
       if (error) throw error;
 
       await salvarMoradorNaLista(destinatario, bloco, apartamento);
@@ -425,7 +430,7 @@ export default function ScannerScreen() {
     if (!currentEncomendaId) return;
     setLoading(true);
     try {
-      const { error } = await supabase.from('encomendas').update({
+      const dataUpdate = {
         qr_code: codigoBarra,
         destinatario: destinatario.toUpperCase().trim(),
         bloco: bloco.toUpperCase().trim(),
@@ -433,7 +438,12 @@ export default function ScannerScreen() {
         remetente: remetente.toUpperCase().trim(),
         observacoes: observacoes.trim(),
         porteiro_entrada: porteiroEntrada.toUpperCase().trim() || 'Não informado',
-      }).eq('encomendas_id', currentEncomendaId);
+      };
+
+      const { error } = await supabase
+        .from('encomendas')
+        .update(dataUpdate)
+        .eq('id', currentEncomendaId);
 
       if (error) throw error;
 
@@ -451,18 +461,12 @@ export default function ScannerScreen() {
     }
   };
 
-  // ---------- ENTREGA ----------
+  // ---------- ENTREGA (CORRIGIDA) ----------
   const handleEfetuarEntrega = async (signature: string, nomeRecebedor: string, porteiroEntrega: string) => {
     if (!currentEncomendaId) return;
     setLoading(true);
     try {
-      const { data: encomenda, error: fetchError } = await supabase
-        .from('encomendas')
-        .select('*')
-        .eq('encomendas_id', currentEncomendaId)
-        .single();
-      if (fetchError || !encomenda) throw new Error('Encomenda não encontrada');
-
+      // 1. Upload da assinatura
       const fileName = `assinaturas/sig_${currentEncomendaId}_${Date.now()}.png`;
       const { error: uploadError } = await supabase.storage
         .from('assinaturas')
@@ -473,38 +477,31 @@ export default function ScannerScreen() {
       if (uploadError) throw uploadError;
       const { data: urlData } = supabase.storage.from('assinaturas').getPublicUrl(fileName);
 
-      const { encomendas_id, ...dadosSemId } = encomenda;
+      const dataRetirada = new Date().toISOString();
 
-      const historico = {
-        ...dadosSemId,
-        id: encomendas_id,
-        status: 'retirada',
-        nome_recebedor: nomeRecebedor.toUpperCase().trim(),
-        porteiro_entrega: porteiroEntrega.toUpperCase().trim() || 'Não informado',
-        assinatura: urlData.publicUrl,
-        data_retirada: new Date().toISOString(),
-      };
-
-      const { error: insertError } = await supabase
-        .from('encomendas_historico')
-        .insert([historico]);
-      if (insertError) throw insertError;
-
-      const { error: deleteError } = await supabase
+      // 2. UPDATE na encomenda (usando a PK 'id')
+      const { error: updateError } = await supabase
         .from('encomendas')
-        .delete()
-        .eq('encomendas_id', currentEncomendaId);
-      if (deleteError) throw deleteError;
+        .update({
+          status: 'retirada',
+          nome_recebedor: nomeRecebedor.toUpperCase().trim(),
+          porteiro_entrega: porteiroEntrega.toUpperCase().trim() || 'Não informado',
+          assinatura: urlData.publicUrl,
+          data_retirada: dataRetirada,
+        })
+        .eq('id', currentEncomendaId);  // ✅ Corrigido: antes usava 'encomendas_id'
+
+      if (updateError) throw updateError;
 
       setSavedSignature(urlData.publicUrl);
       setDeliveryData({
         nome_recebedor: nomeRecebedor,
         porteiro_entrega: porteiroEntrega,
-        data_retirada: historico.data_retirada,
+        data_retirada: dataRetirada,
       });
       setIsReadOnly(true);
       setShowSignatureModal(false);
-      Alert.alert('Sucesso', 'Encomenda entregue e movida para o histórico.');
+      Alert.alert('Entrega realizada com sucesso.');
       router.replace('/encomendas');
     } catch (err: any) {
       Alert.alert('Erro', err.message);
@@ -597,6 +594,7 @@ export default function ScannerScreen() {
         </View>
 
         {isReadOnly ? (
+          // =================== MODO COMPROVANTE (ENTREGA CONCLUÍDA) ===================
           <View style={styles.receiptContainer}>
             <MaterialIcons name="check-circle" size={60} color="#10B981" />
             <Text style={styles.receiptTitle}>ENTREGA CONCLUÍDA</Text>
@@ -631,6 +629,7 @@ export default function ScannerScreen() {
             </TouchableOpacity>
           </View>
         ) : (
+          // =================== FORMULÁRIO (CADASTRO / EDIÇÃO) ===================
           <View style={styles.formCard}>
             <Text style={styles.label}>CÓDIGO DE BARRAS / QR CODE</Text>
             <View style={styles.inputRow}>

@@ -1,30 +1,48 @@
+// React e hook de estado para controlar busca, resultados e loading
 import React, { useState } from 'react';
+// Componentes nativos usados na tela (lista, input de busca, indicador de carregamento, etc.)
 import {
   View, Text, FlatList, TextInput, StyleSheet, ActivityIndicator,
   SafeAreaView, TouchableOpacity, Alert
 } from 'react-native';
+// Ícones do Material Design usados nos cards e no header
 import { MaterialIcons } from '@expo/vector-icons';
+// Hook de navegação do Expo Router, usado para abrir o scanner em modo visualização
 import { useRouter } from 'expo-router';
+// Cliente do Supabase, usado para consultar a tabela de histórico de encomendas
 import { supabase } from '../../lib/supabase';
+// Tipagem de uma Encomenda, reaproveitada como tipo do item da lista
 import { Encomenda } from '../../types';
+// Bibliotecas do Expo para gerar e compartilhar o comprovante em PDF
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+// Contexto de autenticação, usado para saber quem é o usuário logado e seu condomínio
 import { useAuth, AuthContextData } from '../../contexts/AuthContext';
 
+// Alias de tipo para deixar mais legível o uso de "ItemType" nos resultados da busca
 type ItemType = Encomenda;
 
 export default function HistoricoScreen() {
   const router = useRouter();
+  // Dados do usuário logado (nome, condomínio, bloco/apto, tipo de usuário etc.)
   const { perfil } = useAuth() as AuthContextData;
+
+  // Texto digitado na barra de busca
   const [busca, setBusca] = useState('');
+  // Lista de encomendas já retiradas encontradas na busca
   const [resultados, setResultados] = useState<ItemType[]>([]);
+  // Controla o spinner de carregamento (tanto na busca quanto na geração de PDF)
   const [loading, setLoading] = useState(false);
 
+  // Função chamada a cada letra digitada na busca. Consulta o histórico de
+  // encomendas já retiradas, filtrando por condomínio (e, se for morador,
+  // restringindo ao próprio bloco/apartamento).
   const buscarNoBanco = async (texto: string) => {
     if (!perfil) return;
     setBusca(texto);
     const termo = texto.toLowerCase().trim();
 
+    // Exige pelo menos 2 caracteres para evitar buscas muito amplas
     if (termo.length < 2) {
       setResultados([]);
       return;
@@ -32,23 +50,42 @@ export default function HistoricoScreen() {
 
     setLoading(true);
     try {
+      // Query base: apenas encomendas com status "retirada" do condomínio do usuário
       let query = supabase
         .from('encomendas_historico')
         .select('*')
         .eq('status', 'retirada')
         .eq('condominio_id', perfil.condominio_id);
 
+      // 🔹 CORREÇÃO: Morador só pode ver o histórico da própria unidade
+      // Agora usa .ilike com trim() para evitar problemas de maiúsculas/minúsculas e espaços
       if (perfil.tipo_usuario === 'morador') {
+        const bloco = perfil.bloco?.trim() || '';
+        const apto = perfil.apartamento?.trim() || '';
         query = query
-          .eq('apartamento', perfil.apartamento)
-          .eq('bloco', perfil.bloco);
+          .ilike('bloco', `%${bloco}%`)
+          .ilike('apartamento', `%${apto}%`);
       }
 
-      if (termo.includes('/')) {
+      // Tenta identificar se o usuário digitou um filtro combinado de
+      // "bloco + apartamento", aceitando tanto "bloco/apto" (ex: "a/102")
+      // quanto "bloco apto" separado por espaço (ex: "a 102").
+      // Regra: dois "tokens" separados por "/" ou por espaço, onde o
+      // segundo token é numérico (apartamento) — o primeiro é o bloco.
+      const matchBlocoApto = termo.match(/^([a-z0-9]+)[\s/]+(\d+)$/i);
+
+      if (matchBlocoApto) {
+        const [, blocoBusca, aptoBusca] = matchBlocoApto;
+        query = query
+          .ilike('bloco', `%${blocoBusca.trim()}%`)
+          .ilike('apartamento', `%${aptoBusca.trim()}%`);
+      } else if (termo.includes('/')) {
+        // Mantido como fallback para formatos com "/" que não batem com o regex acima
         const [blocoBusca, aptoBusca] = termo.split('/');
         if (blocoBusca) query = query.ilike('bloco', `%${blocoBusca.trim()}%`);
         if (aptoBusca) query = query.ilike('apartamento', `%${aptoBusca.trim()}%`);
       } else {
+        // Busca livre por destinatário, código de barras/QR ou apartamento
         query = query.or(`destinatario.ilike.%${termo}%,qr_code.ilike.%${termo}%,apartamento.ilike.%${termo}%`);
       }
 
@@ -65,11 +102,14 @@ export default function HistoricoScreen() {
     }
   };
 
+  // Formata uma data ISO (vinda do banco) para o padrão brasileiro dd/mm/aaaa hh:mm
   const formatDateTime = (dateStr: string | undefined) => {
     if (!dateStr) return 'N/A';
     return new Date(dateStr).toLocaleString('pt-BR');
   };
 
+  // Gera um comprovante de entrega em PDF para a encomenda selecionada e
+  // abre o menu nativo de compartilhamento/impressão.
   const handleGerarPDF = async (item: ItemType) => {
     if (!item || !item.id) {
       Alert.alert('Erro', 'Item inválido para gerar PDF.');
@@ -78,6 +118,9 @@ export default function HistoricoScreen() {
 
     setLoading(true);
     try {
+      // Busca os dados completos e atualizados do registro (garante que o
+      // comprovante reflita o estado mais recente, mesmo que o item da
+      // lista esteja desatualizado)
       const { data, error } = await supabase
         .from('encomendas_historico')
         .select('*')
@@ -86,6 +129,7 @@ export default function HistoricoScreen() {
 
       if (error || !data) throw new Error('Dados não encontrados');
 
+      // Template HTML/CSS do comprovante, renderizado em PDF pelo expo-print
       const html = `
         <!DOCTYPE html>
         <html>
@@ -149,6 +193,7 @@ export default function HistoricoScreen() {
         </html>
       `;
       
+      // Converte o HTML em arquivo PDF físico e abre o menu de compartilhamento do sistema
       const { uri } = await Print.printToFileAsync({ html, base64: false });
       await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
       
@@ -159,6 +204,8 @@ export default function HistoricoScreen() {
     }
   };
 
+  // Renderiza cada card da lista de histórico. O card inteiro é clicável
+  // (abre o scanner em modo visualização) e tem um botão extra para gerar o PDF.
   const renderItem = (info: { item: ItemType; index: number }) => {
     const item = info.item;
     if (!item || !item.id) {
@@ -220,21 +267,28 @@ export default function HistoricoScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Cabeçalho com título e barra de busca (aceita nome, apto, "bloco apto"/"bloco/apto" ou código) */}
       <View style={styles.header}>
         <Text style={styles.title}>Histórico de Entregas</Text>
         <View style={styles.searchBar}>
           <MaterialIcons name="search" size={24} color="#94a3b8" />
           <TextInput
             style={styles.searchInput}
-            placeholder="Nome, Apto, Bloco/Apto ou Código..."
+            placeholder="Nome, Apto, Bloco Apto ou Código..."
             value={busca}
             onChangeText={buscarNoBanco}
             placeholderTextColor="#94a3b8"
           />
           {loading && <ActivityIndicator size="small" color="#1974f4" />}
+          {!loading && busca.length > 0 && (
+            <TouchableOpacity onPress={() => buscarNoBanco('')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <MaterialIcons name="close" size={20} color="#94a3b8" />
+            </TouchableOpacity>
+          )}
         </View>
       </View>
 
+      {/* Lista de resultados da busca no histórico */}
       <FlatList
         data={resultados}
         keyExtractor={(item: ItemType, index: number) => {
@@ -262,8 +316,9 @@ export default function HistoricoScreen() {
   );
 }
 
+// Estilos da tela: header/busca, cards de histórico e estado vazio
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#d1dfce' },
+  container: { flex: 1, backgroundColor: '#ced5df' },
   header: { padding: 20, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#e2e8f0' },
   title: { fontSize: 22, fontWeight: 'bold', marginBottom: 10, color: '#0f172a' },
   searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f1f5f9', borderRadius: 8, paddingHorizontal: 10, height: 50, borderWidth: 1, borderColor: '#e2e8f0' },

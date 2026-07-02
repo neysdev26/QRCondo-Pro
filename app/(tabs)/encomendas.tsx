@@ -59,7 +59,7 @@ export default function EncomendasScreen() {
       // Normaliza os dados (garantindo 'id' para compatibilidade)
       const dadosNormalizados = (data || []).map((item: any) => ({
         ...item,
-        id: item.id || item.encomendas_id
+        id: item.id || item.encomendas_id || `temp-${Date.now()}-${Math.random()}`,
       }));
 
       setEncomendas(dadosNormalizados);
@@ -79,8 +79,9 @@ export default function EncomendasScreen() {
     }, [fetchEncomendasPendentes])
   );
 
-  // 🔹 Alterna seleção de um item
-  const toggleSelection = (id: string | number) => {
+  // 🔹 Alterna seleção de um item (com verificação de undefined)
+  const toggleSelection = (id: string | number | undefined) => {
+    if (id === undefined) return;
     if (isMorador) return;
     const newSelected = new Set(selectedIds);
     if (newSelected.has(id)) {
@@ -117,20 +118,25 @@ export default function EncomendasScreen() {
 
       // 2. Processa cada encomenda selecionada
       const promises = Array.from(selectedIds).map(async (id) => {
-        // Busca a encomenda
         const { data: enc, error: fetchError } = await supabase
           .from('encomendas')
           .select('*')
-          .eq('encomendas_id', id)
+          .eq('id', id)
           .single();
         if (fetchError || !enc) throw new Error(`Erro ao buscar encomenda ${id}`);
 
-        const { encomendas_id, ...dadosSemId } = enc;
-
-        // Monta registro para histórico com a mesma assinatura
         const historico = {
-          ...dadosSemId,
-          id: encomendas_id,
+          id: enc.encomendas_id,
+          qr_code: enc.qr_code,
+          destinatario: enc.destinatario,
+          bloco: enc.bloco,
+          apartamento: enc.apartamento,
+          remetente: enc.remetente,
+          observacoes: enc.observacoes,
+          porteiro_entrada: enc.porteiro_entrada,
+          porteiro: enc.porteiro,
+          condominio_id: enc.condominio_id,
+          data_chegada: enc.data_chegada,
           status: 'retirada',
           nome_recebedor: nomeRec.toUpperCase().trim(),
           porteiro_entrega: porteiroEnt.toUpperCase().trim() || 'Não informado',
@@ -138,15 +144,18 @@ export default function EncomendasScreen() {
           data_retirada: dataRetirada,
         };
 
-        await supabase.from('encomendas_historico').insert([historico]);
-        await supabase.from('encomendas').delete().eq('encomendas_id', id);
+        const { error: histError } = await supabase.from('encomendas_historico').insert([historico]);
+        if (histError) throw new Error(`Erro ao inserir histórico: ${histError.message}`);
+
+        const { error: delError } = await supabase.from('encomendas').delete().eq('id', id);
+        if (delError) throw new Error(`Erro ao deletar: ${delError.message}`);
       });
 
       await Promise.all(promises);
 
       Alert.alert('Sucesso', `${selectedIds.size} encomendas entregues com sucesso.`);
       
-      // 🔥 Limpeza completa após sucesso
+      // Limpeza completa após sucesso
       setShowBulkModal(false);
       setBulkSignature(null);
       setBulkNomeRecebedor('');
@@ -172,12 +181,22 @@ export default function EncomendasScreen() {
 
     setIsLoading(true);
     try {
-      const { id, ...dadosOriginais } = encomendaParaExcluir;
+      const encId = encomendaParaExcluir.encomendas_id;
+      const rowId = encomendaParaExcluir.id;
 
       const { error: auditError } = await supabase.from('encomendas_excluidos').insert({
-        ...dadosOriginais,
-        encomenda_id: id,
+        encomenda_id: encId,
+        encomendas_id: encId?.toString(),
         condominio_id: encomendaParaExcluir.condominio_id,
+        destinatario: encomendaParaExcluir.destinatario,
+        bloco: encomendaParaExcluir.bloco,
+        apartamento: encomendaParaExcluir.apartamento,
+        remetente: encomendaParaExcluir.remetente,
+        observacoes: encomendaParaExcluir.observacoes,
+        qr_code: encomendaParaExcluir.qr_code,
+        status: encomendaParaExcluir.status,
+        porteiro_entrada: encomendaParaExcluir.porteiro_entrada,
+        data_chegada: encomendaParaExcluir.data_chegada?.toString(),
         porteiro_exclusao: perfil?.id,
         nome_porteiro_exclusao: nomePorteiroConfirmacao.trim(),
         motivo_exclusao: motivoExclusao.trim(),
@@ -188,7 +207,7 @@ export default function EncomendasScreen() {
       const { error: deleteError } = await supabase
         .from('encomendas')
         .delete()
-        .eq('encomendas_id', id);
+        .eq('id', rowId);
       if (deleteError) throw deleteError;
 
       Alert.alert('Sucesso', 'Encomenda excluída do sistema.');
@@ -212,7 +231,11 @@ export default function EncomendasScreen() {
     return (
       <View style={[styles.card, styles.cardPendente, isSelected && styles.cardSelected]}>
         <View style={styles.cardHeader}>
-          <TouchableOpacity onPress={() => toggleSelection(item.id)} style={styles.checkboxArea} disabled={isMorador}>
+          <TouchableOpacity 
+            onPress={() => item.id && toggleSelection(item.id)} 
+            style={styles.checkboxArea} 
+            disabled={isMorador}
+          >
             <MaterialIcons 
               name={isSelected ? "check-box" : "check-box-outline-blank"} 
               size={26} 
@@ -268,26 +291,60 @@ export default function EncomendasScreen() {
     );
   };
 
-  // 🔹 FILTRO DE BUSCA LOCAL
+  // 🔹 FILTRO DE BUSCA LOCAL (melhorado)
   const encomendasFiltradas = encomendas.filter((enc) => {
     const termo = busca.toLowerCase().trim();
     if (termo === '') return true;
-    return (enc.destinatario || '').toLowerCase().includes(termo) || 
-           (enc.apartamento || '').toString().includes(termo) ||
-           (enc.bloco || '').toLowerCase().includes(termo) ||
-           (enc.qr_code || '').toLowerCase().includes(termo);
+
+    const bloco = (enc.bloco || '').toString().toLowerCase();
+    const apto = (enc.apartamento || '').toString().toLowerCase();
+    const destinatario = (enc.destinatario || '').toLowerCase();
+    const qr = (enc.qr_code || '').toLowerCase();
+
+    // Busca por "Bloco/Apto" (ex: "A/101")
+    if (termo.includes('/')) {
+      const [buscaBloco, buscaApto] = termo.split('/').map(s => s.trim());
+      return bloco.includes(buscaBloco) && (!buscaApto || apto.includes(buscaApto));
+    }
+
+    // Busca por "Bloco Apto" (ex: "A 101")
+    if (termo.includes(' ')) {
+      const partes = termo.split(' ').map(s => s.trim()).filter(Boolean);
+      if (partes.length === 2) {
+        return (bloco.includes(partes[0]) && apto.includes(partes[1])) ||
+               (bloco.includes(partes[1]) && apto.includes(partes[0])) ||
+               destinatario.includes(termo);
+      }
+    }
+
+    return destinatario.includes(termo) ||
+           apto.includes(termo) ||
+           bloco.includes(termo) ||
+           qr.includes(termo);
   });
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>{isMorador ? 'Minhas Encomendas' : 'Encomendas Pendentes'}</Text>
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Buscar por nome, apto, bloco ou código..."
-          value={busca}
-          onChangeText={setBusca}
-        />
+        <View style={styles.searchContainer}>
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Buscar por nome, apto, bloco ou código..."
+            value={busca}
+            onChangeText={setBusca}
+            clearButtonMode="never"
+          />
+          {busca.length > 0 && (
+            <TouchableOpacity
+              onPress={() => setBusca('')}
+              style={styles.clearButton}
+              activeOpacity={0.6}
+            >
+              <MaterialIcons name="close" size={20} color="#64748b" />
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
       {isLoading ? (
@@ -298,7 +355,12 @@ export default function EncomendasScreen() {
       ) : (
         <FlatList
           data={encomendasFiltradas}
-          keyExtractor={(item: Encomenda, index: number) => item.id?.toString() || `idx-${index}`}
+          keyExtractor={(item: Encomenda, index: number) => {
+            if (item && item.id) {
+              return item.id.toString();
+            }
+            return `fallback-${index}`;
+          }}
           renderItem={renderItem}
           contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
           ListEmptyComponent={
@@ -361,10 +423,37 @@ export default function EncomendasScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f1f5f9' },
+  container: { flex: 1, backgroundColor: '#ced5df' },
   header: { padding: 16, backgroundColor: '#fff', borderBottomWidth: 1, borderColor: '#e2e8f0' },
   title: { fontSize: 22, fontWeight: 'bold', color: '#1e293b', marginBottom: 12 },
-  searchInput: { backgroundColor: '#f1f5f9', height: 44, borderRadius: 8, paddingHorizontal: 16, fontSize: 15, borderWidth: 1, borderColor: '#cbd5e1' },
+
+  // 🔹 NOVO: contêiner do campo de busca (com fundo, borda, etc.)
+  searchContainer: {
+    backgroundColor: '#f1f5f9',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    justifyContent: 'center', // centraliza verticalmente
+    position: 'relative',     // necessário para o posicionamento absoluto do botão
+  },
+  // 🔹 AJUSTE: o input agora herda o fundo do container e ganha paddingRight
+  searchInput: {
+    height: 44,
+    paddingHorizontal: 16,
+    paddingRight: 44,         // espaço para o botão (20px ícone + 12px margem + folga)
+    fontSize: 15,
+    color: '#1e293b',
+    backgroundColor: 'transparent', // fundo transparente para mostrar o do container
+  },
+  // 🔹 NOVO: botão de limpar dentro do campo
+  clearButton: {
+    position: 'absolute',
+    right: 12,
+    top: '50%',
+    transform: [{ translateY: -10 }], // metade da altura do ícone (20/2)
+    padding: 4,
+    zIndex: 1,
+  },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', marginTop: 80, gap: 10 },
   emptyText: { color: '#64748b', fontSize: 16 },
