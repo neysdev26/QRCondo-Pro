@@ -1,4 +1,4 @@
-📦 CondoDigital - Gestão de Encomendas
+📦 QRCondo Pro - Gestão de Encomendas
 Sistema mobile para controle de entrada e saída de encomendas em condomínios, 
 focado em performance e integridade de dados.
 
