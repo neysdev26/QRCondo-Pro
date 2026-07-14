@@ -87,13 +87,13 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.neysdev.qrcondo_pro'
+    namespace 'com.neysdev.qrcondopro'
     defaultConfig {
-        applicationId 'com.neysdev.qrcondo_pro'
+        applicationId 'com.neysdev.qrcondopro'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 3
-        versionName "1.0.27"
+        versionName "1.0.28"
     }
     signingConfigs {
         debug {

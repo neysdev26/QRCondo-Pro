@@ -282,7 +282,8 @@ export default function EncomendasScreen() {
             <MaterialIcons name="notifications-active" size={20} color="#0b5176" />
             <Text style={styles.btnAvisoText}>Avisar</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.actionButton, styles.btnEntregar]} onPress={() => router.push({ pathname: '/scanner', params: { id: item.id } })}>
+          <TouchableOpacity style={[styles.actionButton, styles.btnEntregar]} onPress={() => router.push({ pathname: '/scanner', params: { id: item.id.toString() } })}>
+
             <MaterialIcons name="assignment-turned-in" size={20} color="#fff" />
             <Text style={styles.btnEntregarText}>{isMorador ? 'Ver' : 'Entregar'}</Text>
           </TouchableOpacity>

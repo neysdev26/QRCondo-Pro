@@ -4,12 +4,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useEncomenda } from '../../hooks/useEncomenda';
 import { useAuth } from '../../contexts/AuthContext';
+import { supabase } from '../../lib/supabase';
 import Constants from 'expo-constants';
+import { useState } from 'react';
 
 export default function ConfiguracoesPage() {
   const insets = useSafeAreaInsets();
   const { createBackup, loading } = useEncomenda();
   const { signOut } = useAuth() as any;
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   const appVersion = Constants.expoConfig?.version || Constants.nativeAppVersion || '1.0.12';
 
@@ -35,6 +38,58 @@ export default function ConfiguracoesPage() {
             } catch (err: any) {
               Alert.alert("Erro ao sair", err.message || "Não foi possível efetuar o logout.");
             }
+          }
+        }
+      ]
+    );
+  };
+
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      "⚠️ Excluir Conta",
+      "Esta ação é PERMANENTE e não pode ser desfeita.\n\nTodos os seus dados de acesso serão apagados. Encomendas e registros do condomínio seguem as regras de retenção do sistema.\n\nDeseja continuar?",
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Continuar",
+          style: "destructive",
+          onPress: () => {
+            // Segunda confirmação, para evitar exclusões acidentais
+            Alert.alert(
+              "Confirmação Final",
+              "Tem certeza absoluta que deseja excluir sua conta definitivamente?",
+              [
+                { text: "Cancelar", style: "cancel" },
+                {
+                  text: "Excluir Definitivamente",
+                  style: "destructive",
+                  onPress: async () => {
+                    setDeletingAccount(true);
+                    try {
+                      // Chama uma Edge Function no Supabase responsável por apagar
+                      // o usuário em auth.users (requer service_role, por isso
+                      // não pode ser feito diretamente pelo client)
+                      const { error } = await supabase.functions.invoke('delete-account');
+
+                      if (error) throw error;
+
+                      Alert.alert(
+                        "Conta Excluída",
+                        "Sua conta foi excluída com sucesso.",
+                        [{ text: "OK", onPress: async () => await signOut() }]
+                      );
+                    } catch (err: any) {
+                      Alert.alert(
+                        "Erro ao Excluir Conta",
+                        err.message || "Não foi possível excluir sua conta. Tente novamente ou entre em contato com o suporte."
+                      );
+                    } finally {
+                      setDeletingAccount(false);
+                    }
+                  }
+                }
+              ]
+            );
           }
         }
       ]
@@ -143,6 +198,22 @@ export default function ConfiguracoesPage() {
             <Text style={styles.cardSub}>Desconectar seu usuário deste dispositivo.</Text>
           </View>
           <MaterialIcons name="chevron-right" size={24} color="#cbd5e1" />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.settingCard, { borderTopWidth: 1, borderTopColor: '#f1f5f9' }]}
+          onPress={handleDeleteAccount}
+          disabled={deletingAccount}
+          activeOpacity={0.7}
+        >
+          <View style={[styles.iconBox, { backgroundColor: '#fee2e2' }]}>
+            <MaterialIcons name="delete-forever" size={24} color="#dc2626" />
+          </View>
+          <View style={styles.cardContent}>
+            <Text style={[styles.cardTitle, { color: '#dc2626' }]}>Excluir Conta</Text>
+            <Text style={styles.cardSub}>Apagar sua conta e dados de acesso definitivamente.</Text>
+          </View>
+          {deletingAccount ? <ActivityIndicator color="#dc2626" /> : <MaterialIcons name="chevron-right" size={24} color="#cbd5e1" />}
         </TouchableOpacity>
       </View>
 

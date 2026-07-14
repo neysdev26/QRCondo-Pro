@@ -1,17 +1,26 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  View, Text, StyleSheet, TextInput, TouchableOpacity,
-  Alert, ActivityIndicator, ScrollView, Modal, Image,
-  KeyboardAvoidingView, Platform
+  View,
+  Text,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  Alert,
+  ActivityIndicator,
+  ScrollView,
+  Modal,
+  Image,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 import { useAuth, AuthContextData } from '../../contexts/AuthContext';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { decode } from 'base64-arraybuffer';
-import { Audio } from 'expo-av';
+import { useAudioPlayer } from 'expo-audio';
 import SignaturePad from '../../components/SignaturePad';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
@@ -24,24 +33,14 @@ export default function ScannerScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { perfil } = useAuth() as AuthContextData;
+  const beepPlayer = useAudioPlayer(require('../../assets/sounds/beep.mp3'));
 
   const params = useLocalSearchParams<{ id?: string; data?: string }>();
 
+  // 🔹 REF para controlar se já processamos o ID atual
+  const processedIdRef = useRef<string | undefined>(undefined);
+
   const [currentEncomendaId, setCurrentEncomendaId] = useState<string | undefined>(undefined);
-
-  const encomendaIdFromParams: string | undefined = (() => {
-    if (params.id) return params.id;
-    if (params.data) {
-      try { return JSON.parse(params.data).id; } catch { return undefined; }
-    }
-    return undefined;
-  })();
-
-  useEffect(() => {
-    if (encomendaIdFromParams) {
-      setCurrentEncomendaId(encomendaIdFromParams);
-    }
-  }, [encomendaIdFromParams]);
 
   // ---------- ESTADOS DO FORMULÁRIO ----------
   const [codigoBarra, setCodigoBarra] = useState('');
@@ -60,7 +59,7 @@ export default function ScannerScreen() {
   const [deliveryData, setDeliveryData] = useState({
     nome_recebedor: '',
     porteiro_entrega: '',
-    data_retirada: ''
+    data_retirada: '',
   });
   const [scanned, setScanned] = useState(false);
 
@@ -71,7 +70,39 @@ export default function ScannerScreen() {
 
   const [permission, requestPermission] = useCameraPermissions();
 
-  // ---------- FUNÇÕES DE BUSCA PARA AUTCOMPLETE ----------
+  // 🔹 CORREÇÃO DEFINITIVA: useFocusEffect para capturar o ID sempre que a tela ganha foco
+  useFocusEffect(
+    useCallback(() => {
+      const idFromParams = params.id || undefined;
+      
+      // Se não tem ID, reseta o formulário
+      if (!idFromParams) {
+        if (currentEncomendaId) {
+          resetForm();
+        }
+        return;
+      }
+
+      // Se o ID for diferente do atual, processa
+      if (idFromParams !== currentEncomendaId && idFromParams !== processedIdRef.current) {
+        processedIdRef.current = idFromParams;
+        setCurrentEncomendaId(idFromParams);
+        carregarEncomenda(idFromParams);
+      }
+    }, [params.id])
+  );
+
+  // 🔹 Se o ID mudar via params (quando a tela é montada pela primeira vez)
+  useEffect(() => {
+    const idFromParams = params.id || undefined;
+    if (idFromParams && idFromParams !== currentEncomendaId && idFromParams !== processedIdRef.current) {
+      processedIdRef.current = idFromParams;
+      setCurrentEncomendaId(idFromParams);
+      carregarEncomenda(idFromParams);
+    }
+  }, [params.id]);
+
+  // ---------- FUNÇÕES DE BUSCA PARA AUTOCOMPLETE ----------
   const buscarSugestoes = async (
     campo: 'destinatario' | 'remetente' | 'porteiro',
     texto: string,
@@ -201,73 +232,70 @@ export default function ScannerScreen() {
   };
 
   // ---------- CARREGAR DADOS DA ENCOMENDA ----------
-  useEffect(() => {
-    async function carregarEncomenda() {
-      if (!currentEncomendaId) {
-        resetForm();
-        return;
-      }
-      setLoading(true);
-      try {
-        if (params.data) {
-          try {
-            const d = JSON.parse(params.data);
-            setCodigoBarra(d.codigoBarra || '');
-            setDestinatario(d.destinatario || '');
-            setBloco(d.bloco || '');
-            setApartamento(d.apartamento || '');
-            setRemetente(d.remetente || '');
-            setObservacoes(d.observacoes || '');
-            setPorteiroEntrada(d.porteiro_entrada || '');
-          } catch { }
-        }
-
-        let registro: any = null;
-        const { data: enc } = await supabase.from('encomendas').select('*').eq('id', currentEncomendaId).maybeSingle();
-        if (enc) {
-          registro = enc;
-        } else {
-          const { data: hist } = await supabase.from('encomendas_historico').select('*').eq('id', currentEncomendaId).maybeSingle();
-          registro = hist;
-        }
-
-        if (registro) {
-          if (perfil?.tipo_usuario === 'morador') {
-            if (registro.apartamento !== perfil.apartamento || registro.bloco !== perfil.bloco) {
-              Alert.alert('Acesso negado', 'Esta encomenda não pertence ao seu apartamento.');
-              resetForm();
-              setLoading(false);
-              return;
-            }
-          }
-
-          setCodigoBarra(registro.qr_code || '');
-          setDestinatario(registro.destinatario || '');
-          setBloco(registro.bloco || '');
-          setApartamento(registro.apartamento || '');
-          setRemetente(registro.remetente || '');
-          setObservacoes(registro.observacoes || '');
-          setPorteiroEntrada(registro.porteiro_entrada || '');
-          setSavedSignature(registro.assinatura || null);
-          setIsReadOnly(registro.status === 'retirada');
-          setDeliveryData({
-            nome_recebedor: registro.nome_recebedor || '',
-            porteiro_entrega: registro.porteiro_entrega || '',
-            data_retirada: registro.data_retirada || '',
-          });
-          setModoEdicao(registro.status !== 'retirada');
-        }
-      } catch (err) {
-        console.error(err);
-        Alert.alert('Erro', 'Não foi possível carregar os dados.');
-      } finally {
-        setLoading(false);
-      }
+  const carregarEncomenda = useCallback(async (id: string) => {
+    if (!id) {
+      resetForm();
+      return;
     }
-    carregarEncomenda();
-  }, [currentEncomendaId]);
 
-  const resetForm = () => {
+    setLoading(true);
+    try {
+      let registro: any = null;
+      const { data: enc } = await supabase
+        .from('encomendas')
+        .select('*')
+        .eq('id', id)
+        .maybeSingle();
+
+      if (enc) {
+        registro = enc;
+      } else {
+        const { data: hist } = await supabase
+          .from('encomendas_historico')
+          .select('*')
+          .eq('id', id)
+          .maybeSingle();
+        registro = hist;
+      }
+
+      if (registro) {
+        if (perfil?.tipo_usuario === 'morador') {
+          if (registro.apartamento !== perfil.apartamento || registro.bloco !== perfil.bloco) {
+            Alert.alert('Acesso negado', 'Esta encomenda não pertence ao seu apartamento.');
+            resetForm();
+            setLoading(false);
+            return;
+          }
+        }
+
+        setCodigoBarra(registro.qr_code || '');
+        setDestinatario(registro.destinatario || '');
+        setBloco(registro.bloco || '');
+        setApartamento(registro.apartamento || '');
+        setRemetente(registro.remetente || '');
+        setObservacoes(registro.observacoes || '');
+        setPorteiroEntrada(registro.porteiro_entrada || '');
+        setSavedSignature(registro.assinatura || null);
+        setIsReadOnly(registro.status === 'retirada');
+        setDeliveryData({
+          nome_recebedor: registro.nome_recebedor || '',
+          porteiro_entrega: registro.porteiro_entrega || '',
+          data_retirada: registro.data_retirada || '',
+        });
+        setModoEdicao(registro.status !== 'retirada');
+      } else {
+        Alert.alert('Aviso', 'Encomenda não encontrada.');
+        resetForm();
+      }
+    } catch (err) {
+      console.error(err);
+      Alert.alert('Erro', 'Não foi possível carregar os dados.');
+    } finally {
+      setLoading(false);
+    }
+  }, [perfil]);
+
+  const resetForm = useCallback(() => {
     setCodigoBarra('');
     setDestinatario('');
     setBloco('');
@@ -280,8 +308,9 @@ export default function ScannerScreen() {
     setSavedSignature(null);
     setDeliveryData({ nome_recebedor: '', porteiro_entrega: '', data_retirada: '' });
     setCurrentEncomendaId(undefined);
+    processedIdRef.current = undefined;
     router.setParams({ id: '' });
-  };
+  }, [router]);
 
   // ---------- CÂMERA ----------
   const handleAbrirCamera = async () => {
@@ -300,10 +329,8 @@ export default function ScannerScreen() {
     setScanned(true);
 
     try {
-      const { sound } = await Audio.Sound.createAsync(
-        require('../../assets/sounds/beep.mp3')
-      );
-      await sound.playAsync();
+      beepPlayer.seekTo(0);
+      beepPlayer.play();
     } catch (e) {
       console.log('Erro ao tocar beep');
     }
@@ -332,6 +359,7 @@ export default function ScannerScreen() {
 
       // 🔹 USAR SEMPRE O 'id' (PK), NÃO 'encomendas_id'
       const idEncomenda = encomendaExistente.id;
+      processedIdRef.current = idEncomenda;
       setCurrentEncomendaId(idEncomenda);
       router.setParams({ id: idEncomenda });
 
@@ -354,6 +382,7 @@ export default function ScannerScreen() {
       setPorteiroEntrada('');
       setModoEdicao(false);
       setCurrentEncomendaId(undefined);
+      processedIdRef.current = undefined;
       router.setParams({ id: '' });
     }
 
@@ -380,8 +409,6 @@ export default function ScannerScreen() {
       Alert.alert('Atenção', 'Preencha destinatário e apartamento.');
       return;
     }
-
-    console.log('📝 porteiroEntrada:', porteiroEntrada);
 
     setLoading(true);
     try {
@@ -452,7 +479,7 @@ export default function ScannerScreen() {
       await salvarRemetenteNaLista(remetente);
 
       Alert.alert('Sucesso', 'Encomenda atualizada!', [
-        { text: 'OK', onPress: () => handleLimparForm() }
+        { text: 'OK', onPress: () => handleLimparForm() },
       ]);
     } catch (err: any) {
       Alert.alert('Erro', err.message);
@@ -461,7 +488,7 @@ export default function ScannerScreen() {
     }
   };
 
-  // ---------- ENTREGA (CORRIGIDA) ----------
+  // ---------- ENTREGA ----------
   const handleEfetuarEntrega = async (signature: string, nomeRecebedor: string, porteiroEntrega: string) => {
     if (!currentEncomendaId) return;
     setLoading(true);
@@ -489,19 +516,14 @@ export default function ScannerScreen() {
           assinatura: urlData.publicUrl,
           data_retirada: dataRetirada,
         })
-        .eq('id', currentEncomendaId);  // ✅ Corrigido: antes usava 'encomendas_id'
+        .eq('id', currentEncomendaId);
 
       if (updateError) throw updateError;
 
-      setSavedSignature(urlData.publicUrl);
-      setDeliveryData({
-        nome_recebedor: nomeRecebedor,
-        porteiro_entrega: porteiroEntrega,
-        data_retirada: dataRetirada,
-      });
-      setIsReadOnly(true);
       setShowSignatureModal(false);
       Alert.alert('Entrega realizada com sucesso.');
+
+      resetForm();
       router.replace('/encomendas');
     } catch (err: any) {
       Alert.alert('Erro', err.message);
@@ -564,7 +586,11 @@ export default function ScannerScreen() {
   };
 
   if (loading && !showSignatureModal) {
-    return <View style={styles.loadingCenter}><ActivityIndicator size="large" color="#1974f4" /></View>;
+    return (
+      <View style={styles.loadingCenter}>
+        <ActivityIndicator size="large" color="#1974f4" />
+      </View>
+    );
   }
 
   const isVisualizacao = !!currentEncomendaId;
@@ -584,34 +610,63 @@ export default function ScannerScreen() {
         showsVerticalScrollIndicator={true}
       >
         <View style={styles.headerRow}>
-          <Text style={styles.title}>{!isVisualizacao ? 'Novo Cadastro' : modoEdicao ? 'Editando' : 'Detalhes'}</Text>
+          <Text style={styles.title}>
+            {!isVisualizacao ? 'Novo Cadastro' : modoEdicao ? 'Editando' : 'Detalhes'}
+          </Text>
           {isVisualizacao && perfil?.tipo_usuario !== 'morador' && (
-            <TouchableOpacity style={[styles.btnEditar, modoEdicao && styles.btnEditarAtivo]} onPress={() => setModoEdicao(v => !v)}>
-              <MaterialCommunityIcons name={modoEdicao ? 'close' : 'pencil-outline'} size={18} color={modoEdicao ? '#ef4444' : '#1974f4'} />
-              <Text style={[styles.btnEditarText, modoEdicao && { color: '#ef4444' }]}>{modoEdicao ? 'CANCELAR' : 'EDITAR'}</Text>
+            <TouchableOpacity
+              style={[styles.btnEditar, modoEdicao && styles.btnEditarAtivo]}
+              onPress={() => setModoEdicao((v) => !v)}
+            >
+              <MaterialCommunityIcons
+                name={modoEdicao ? 'close' : 'pencil-outline'}
+                size={18}
+                color={modoEdicao ? '#ef4444' : '#1974f4'}
+              />
+              <Text style={[styles.btnEditarText, modoEdicao && { color: '#ef4444' }]}>
+                {modoEdicao ? 'CANCELAR' : 'EDITAR'}
+              </Text>
             </TouchableOpacity>
           )}
         </View>
 
         {isReadOnly ? (
-          // =================== MODO COMPROVANTE (ENTREGA CONCLUÍDA) ===================
           <View style={styles.receiptContainer}>
             <MaterialIcons name="check-circle" size={60} color="#10B981" />
             <Text style={styles.receiptTitle}>ENTREGA CONCLUÍDA</Text>
             <View style={styles.receiptSection}>
               <View style={styles.receiptDataCard}>
                 <Text style={styles.receiptLabel}>DADOS DO REGISTRO</Text>
-                <Text style={styles.receiptText}><Text style={styles.bold}>QR Code:</Text> {codigoBarra}</Text>
-                <Text style={styles.receiptText}><Text style={styles.bold}>Morador:</Text> {destinatario}</Text>
-                <Text style={styles.receiptText}><Text style={styles.bold}>Unidade:</Text> {bloco} - {apartamento}</Text>
-                <Text style={styles.receiptText}><Text style={styles.bold}>Remetente:</Text> {remetente || 'N/A'}</Text>
-                <Text style={styles.receiptText}><Text style={styles.bold}>Porteiro (Entrada):</Text> {porteiroEntrada || 'Não informado'}</Text>
+                <Text style={styles.receiptText}>
+                  <Text style={styles.bold}>QR Code:</Text> {codigoBarra}
+                </Text>
+                <Text style={styles.receiptText}>
+                  <Text style={styles.bold}>Morador:</Text> {destinatario}
+                </Text>
+                <Text style={styles.receiptText}>
+                  <Text style={styles.bold}>Unidade:</Text> {bloco} - {apartamento}
+                </Text>
+                <Text style={styles.receiptText}>
+                  <Text style={styles.bold}>Remetente:</Text> {remetente || 'N/A'}
+                </Text>
+                <Text style={styles.receiptText}>
+                  <Text style={styles.bold}>Porteiro (Entrada):</Text> {porteiroEntrada || 'Não informado'}
+                </Text>
               </View>
               <View style={[styles.receiptDataCard, { marginTop: 15, borderColor: '#10B981' }]}>
                 <Text style={[styles.receiptLabel, { color: '#10B981' }]}>DADOS DA RETIRADA</Text>
-                <Text style={styles.receiptText}><Text style={styles.bold}>Retirado por:</Text> {deliveryData.nome_recebedor}</Text>
-                <Text style={styles.receiptText}><Text style={styles.bold}>Porteiro (Entrega):</Text> {deliveryData.porteiro_entrega || 'Não informado'}</Text>
-                <Text style={styles.receiptText}><Text style={styles.bold}>Data Retirada:</Text> {new Date(deliveryData.data_retirada).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}</Text>
+                <Text style={styles.receiptText}>
+                  <Text style={styles.bold}>Retirado por:</Text> {deliveryData.nome_recebedor}
+                </Text>
+                <Text style={styles.receiptText}>
+                  <Text style={styles.bold}>Porteiro (Entrega):</Text> {deliveryData.porteiro_entrega || 'Não informado'}
+                </Text>
+                <Text style={styles.receiptText}>
+                  <Text style={styles.bold}>Data Retirada:</Text>{' '}
+                  {new Date(deliveryData.data_retirada).toLocaleString('pt-BR', {
+                    timeZone: 'America/Sao_Paulo',
+                  })}
+                </Text>
               </View>
             </View>
             {savedSignature && (
@@ -629,7 +684,6 @@ export default function ScannerScreen() {
             </TouchableOpacity>
           </View>
         ) : (
-          // =================== FORMULÁRIO (CADASTRO / EDIÇÃO) ===================
           <View style={styles.formCard}>
             <Text style={styles.label}>CÓDIGO DE BARRAS / QR CODE</Text>
             <View style={styles.inputRow}>
@@ -771,10 +825,7 @@ export default function ScannerScreen() {
 
         <Modal visible={cameraVisible} animationType="slide" onRequestClose={() => setCameraVisible(false)}>
           <View style={styles.cameraContainer}>
-            <CameraViewComponent
-              style={StyleSheet.absoluteFillObject}
-              onBarcodeScanned={handleBarCodeScanned}
-            />
+            <CameraViewComponent style={StyleSheet.absoluteFillObject} onBarcodeScanned={handleBarCodeScanned} />
             <TouchableOpacity style={styles.closeCameraBtn} onPress={() => setCameraVisible(false)}>
               <MaterialCommunityIcons name="close-circle" size={54} color="#fff" />
             </TouchableOpacity>
@@ -788,23 +839,62 @@ export default function ScannerScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#ced5df', paddingHorizontal: 12 },
   loadingCenter: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#ced5df' },
-  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, marginTop: 16},
+  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, marginTop: 16 },
   title: { fontSize: 22, fontWeight: 'bold', color: '#0f172a', flexShrink: 1 },
-  btnEditar: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, borderWidth: 1.5, borderColor: '#1974f4', backgroundColor: '#eff6ff' },
+  btnEditar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: '#1974f4',
+    backgroundColor: '#eff6ff',
+  },
   btnEditarAtivo: { borderColor: '#ef4444', backgroundColor: '#fff1f2' },
   btnEditarText: { fontSize: 12, fontWeight: 'bold', color: '#1974f4' },
   formCard: { backgroundColor: '#fff', borderRadius: 16, padding: 20, elevation: 3 },
   label: { fontSize: 12, fontWeight: 'bold', color: '#1a1b1c', marginBottom: 8, marginTop: 8 },
-  input: { backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#2f3134', borderRadius: 10, paddingHorizontal: 14, height: 50, fontSize: 15, color: '#0f172a', marginBottom: 8 },
+  input: {
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#2f3134',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    height: 50,
+    fontSize: 15,
+    color: '#0f172a',
+    marginBottom: 8,
+  },
   disabledInput: { backgroundColor: '#e2e8f0', borderColor: '#2f3134', color: '#475569' },
   inputRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
   scanButton: { backgroundColor: '#1974f4', width: 48, height: 48, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
   gridRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
   textArea: { height: 80, paddingTop: 14, textAlignVertical: 'top', marginBottom: 8 },
   acoesRow: { flexDirection: 'row', gap: 10, marginTop: 25 },
-  btnSalvar: { backgroundColor: '#1974f4', height: 52, borderRadius: 10, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 10, marginTop: 25, elevation: 3 },
+  btnSalvar: {
+    backgroundColor: '#1974f4',
+    height: 52,
+    borderRadius: 10,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 25,
+    elevation: 3,
+  },
   btnSalvarText: { color: '#fff', fontWeight: 'bold', fontSize: 15 },
-  btnExcluir: { width: 52, height: 52, borderRadius: 10, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff1f2', borderWidth: 1.5, borderColor: '#fca5a5' },
+  btnExcluir: {
+    width: 52,
+    height: 52,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#fff1f2',
+    borderWidth: 1.5,
+    borderColor: '#fca5a5',
+  },
   cameraContainer: { flex: 1, backgroundColor: '#000', justifyContent: 'flex-end', alignItems: 'center' },
   closeCameraBtn: { marginBottom: 40, backgroundColor: 'rgba(229,23,23,0.86)', borderRadius: 30, padding: 2 },
   receiptContainer: { backgroundColor: '#fff', padding: 20, borderRadius: 20, alignItems: 'center', elevation: 5 },
@@ -817,7 +907,16 @@ const styles = StyleSheet.create({
   sigLabel: { fontSize: 11, color: '#94a3b8', marginBottom: 5 },
   bold: { fontWeight: 'bold' },
   receiptSig: { width: '100%', height: 120, backgroundColor: '#f1f5f9', borderRadius: 10 },
-  pdfBtn: { backgroundColor: '#ef4444', padding: 15, borderRadius: 12, width: '100%', alignItems: 'center', marginTop: 25, flexDirection: 'row', justifyContent: 'center' },
+  pdfBtn: {
+    backgroundColor: '#ef4444',
+    padding: 15,
+    borderRadius: 12,
+    width: '100%',
+    alignItems: 'center',
+    marginTop: 25,
+    flexDirection: 'row',
+    justifyContent: 'center',
+  },
   btnTxt: { color: '#fff', fontWeight: 'bold', fontSize: 15 },
   btnNew: { marginTop: 15, padding: 10 },
   btnNewTxt: { color: '#1974f4', fontWeight: 'bold' },

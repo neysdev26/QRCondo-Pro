@@ -217,8 +217,11 @@ export default function HistoricoScreen() {
         {/* 🔹 TOUCHABLE PARA NAVEGAR AO SCANNER EM MODO VISUALIZAÇÃO */}
         <TouchableOpacity
           onPress={() => {
+            // router.navigate (não push): como o Scanner é uma aba já montada,
+            // navigate garante que os params (id) sejam atualizados
+            // corretamente já no primeiro toque.
             // Navega para o scanner passando o ID. O scanner detectará status='retirada' e entrará em modo read-only (apenas comprovante)
-            router.push({ pathname: '/scanner', params: { id: item.id } });
+            router.navigate({ pathname: '/scanner', params: { id: item.id } });
           }}
           activeOpacity={0.7}
         >

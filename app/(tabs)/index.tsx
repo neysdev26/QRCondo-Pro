@@ -8,6 +8,11 @@ import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
 
+// Tipo dos nomes válidos de ícone do MaterialCommunityIcons — usado para
+// que o TypeScript valide o mapa de ícones abaixo em vez de tratá-lo como
+// 'string' genérico (o que mascara nomes de ícone inválidos/digitados errado).
+type MCIIconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
+
 export default function DashboardScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -22,6 +27,63 @@ export default function DashboardScreen() {
     pendentes_total: 0,
     entregues_hoje: 0
   });
+
+  // 🔹 Função para mapear descrição para ícone
+  const getIconForDescription = useCallback((descricao: string): MCIIconName => {
+    if (!descricao) return 'package-variant';
+    
+    const desc = descricao.toLowerCase().trim();
+    
+    const iconMap: { [key: string]: MCIIconName } = {
+      'carta': 'email',
+      'cartas': 'email',
+      'cx': 'package',
+      'caixa': 'package',
+      'caixas': 'package',
+      'pct': 'package-variant',
+      'pacote': 'package-variant',
+      'pacotes': 'package-variant',
+      'encomenda': 'package-variant',
+      'encomendas': 'package-variant',
+      'documento': 'file-document',
+      'documentos': 'file-document',
+      'sedex': 'truck-fast',
+      'transportadora': 'truck',
+      'mercadoria': 'shopping',
+      'mercadorias': 'shopping',
+      'comida': 'food',
+      'alimento': 'food',
+      'medicamento': 'pill',
+      'remédio': 'pill',
+      'remedio': 'pill',
+      'roupa': 'hanger',
+      'roupas': 'hanger',
+      'vestuário': 'hanger',
+      'vestuario': 'hanger',
+      'livro': 'book',
+      'livros': 'book',
+      'eletrônico': 'laptop',
+      'eletronico': 'laptop',
+      'eletrônicos': 'laptop',
+      'eletronicos': 'laptop',
+      'celular': 'cellphone',
+      'tv': 'television',
+      'televisão': 'television',
+      'televisao': 'television',
+      'brinquedo': 'toy-brick',
+      'brinquedos': 'toy-brick',
+      'ferramenta': 'wrench',
+      'ferramentas': 'wrench'
+    };
+    
+    for (const [key, icon] of Object.entries(iconMap)) {
+      if (desc.includes(key)) {
+        return icon;
+      }
+    }
+    
+    return 'package-variant';
+  }, []);
 
   const buscarNomeCondominio = useCallback(async () => {
     if (!perfil || !perfil.condominio_id) return;
@@ -128,7 +190,6 @@ export default function DashboardScreen() {
     }
   }, [perfil, buscarNomeCondominio]);
 
-  // Atualiza silenciosamente ao voltar para a tela
   useFocusEffect(
     useCallback(() => {
       if (perfil) fetchStats(false);
@@ -153,6 +214,12 @@ export default function DashboardScreen() {
     fetchStats(false);
   };
 
+  // 🔹 Função para navegar para o scanner com o ID correto
+  const handleCardPress = useCallback((item: any) => {
+  if (!item || !item.id) return;
+  router.push({ pathname: '/scanner', params: { id: item.id.toString() } });
+}, [router]);
+
   const widgetsData = useMemo(() => [
     { title: 'Chegaram Hoje', value: dbStats.chegados_hoje, icon: 'package-variant-closed', color: '#1974f4', bgColor: '#e8f2ff' },
     { title: 'Aguardando Retirada', value: dbStats.pendentes_total, icon: 'clock-outline', color: '#b27b00', bgColor: '#fff9db' },
@@ -166,6 +233,8 @@ export default function DashboardScreen() {
       </View>
     );
   }
+
+  const inicial = perfil?.nome?.charAt(0)?.toUpperCase() || '?';
 
   return (
     <ScrollView
@@ -182,8 +251,8 @@ export default function DashboardScreen() {
           </View>
         </View>
         {perfil && (
-          <View style={styles.userBadge}>
-            <Text style={styles.userBadgeText}>{perfil.nome?.split(' ')[0]}</Text>
+          <View style={styles.avatarContainer}>
+            <Text style={styles.avatarText}>{inicial}</Text>
           </View>
         )}
       </View>
@@ -241,47 +310,57 @@ export default function DashboardScreen() {
             <Text style={styles.emptyText}>Nenhuma encomenda registrada recentemente.</Text>
           </View>
         ) : (
-          encomendas.map((item, index) => (
-            <TouchableOpacity
-              key={item.id || index}
-              style={styles.listItemCard}
-              activeOpacity={0.7}
-              onPress={() => router.push({ pathname: '/scanner', params: { id: item.id } })}
-            >
-              <View style={styles.listItemLeft}>
-                <View style={[styles.statusIndicator, { backgroundColor: item.status === 'pendente' ? '#f59e0b' : '#10b981' }]} />
-                <View style={styles.listIconBox}>
-                  <MaterialCommunityIcons
-                    name={item.status === 'pendente' ? 'clock-outline' : 'check-circle'}
-                    size={24}
-                    color={item.status === 'pendente' ? '#f59e0b' : '#10b981'}
-                  />
+          encomendas.map((item: any, index: number) => {
+            const iconName = getIconForDescription(item.observacoes);
+            const iconColor = item.status === 'pendente' ? '#f59e0b' : '#10b981';
+            
+            return (
+              <TouchableOpacity
+                key={item.id || index}
+                style={styles.listItemCard}
+                activeOpacity={0.7}
+                onPress={() => handleCardPress(item)}
+              >
+                <View style={styles.listItemLeft}>
+                  <View style={[styles.statusIndicator, { backgroundColor: item.status === 'pendente' ? '#f59e0b' : '#10b981' }]} />
+                  <View style={styles.listIconBox}>
+                    <MaterialCommunityIcons
+                      name={iconName}
+                      size={24}
+                      color={iconColor}
+                    />
+                  </View>
                 </View>
-              </View>
-              <View style={styles.listInfo}>
-                <View style={styles.listRow}>
-                  <Text style={styles.listDestinatario} numberOfLines={1}>{item.destinatario}</Text>
-                  <Text style={styles.listStatus}>{item.status === 'pendente' ? 'PENDENTE' : 'ENTREGUE'}</Text>
-                </View>
-                <Text style={styles.listSub}>Bloco {item.bloco} - Apto {item.apartamento}</Text>
-                <View style={styles.listMeta}>
-                  <MaterialCommunityIcons name="clock-time-four-outline" size={14} color="#94a3b8" />
-                  <Text style={styles.listDate}>
-                    {item.data_chegada
-                      ? new Date(item.data_chegada).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-                      : ''}
-                  </Text>
-                  {item.remetente && (
-                    <>
-                      <MaterialCommunityIcons name="mail" size={14} color="#94a3b8" style={{ marginLeft: 12 }} />
-                      <Text style={styles.listRemetente} numberOfLines={1}>{item.remetente}</Text>
-                    </>
+                <View style={styles.listInfo}>
+                  <View style={styles.listRow}>
+                    <Text style={styles.listDestinatario} numberOfLines={1}>{item.destinatario}</Text>
+                    <Text style={styles.listStatus}>{item.status === 'pendente' ? 'PENDENTE' : 'ENTREGUE'}</Text>
+                  </View>
+                  <Text style={styles.listSub}>Bloco {item.bloco} - Apto {item.apartamento}</Text>
+                  <View style={styles.listMeta}>
+                    <MaterialCommunityIcons name="clock-time-four-outline" size={14} color="#94a3b8" />
+                    <Text style={styles.listDate}>
+                      {item.data_chegada
+                        ? new Date(item.data_chegada).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                        : ''}
+                    </Text>
+                    {item.remetente && (
+                      <>
+                        <MaterialCommunityIcons name="email" size={14} color="#94a3b8" style={{ marginLeft: 12 }} />
+                        <Text style={styles.listRemetente} numberOfLines={1}>{item.remetente}</Text>
+                      </>
+                    )}
+                  </View>
+                  {item.observacoes && (
+                    <Text style={styles.listObservacao} numberOfLines={1}>
+                      📝 {item.observacoes}
+                    </Text>
                   )}
                 </View>
-              </View>
-              <MaterialCommunityIcons name="chevron-right" size={24} color="#94a3b8" />
-            </TouchableOpacity>
-          ))
+                <MaterialCommunityIcons name="chevron-right" size={24} color="#94a3b8" />
+              </TouchableOpacity>
+            );
+          })
         )}
       </View>
     </ScrollView>
@@ -296,8 +375,26 @@ const styles = StyleSheet.create({
   headerTitles: { flexDirection: 'column' },
   appName: { fontSize: 26, fontWeight: 'bold', color: '#1974f4', letterSpacing: 0.5 },
   appTagline: { fontSize: 12, color: '#64748b', marginTop: 2 },
-  userBadge: { backgroundColor: '#1974f4', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
-  userBadgeText: { color: '#fff', fontWeight: 'bold', fontSize: 13 },
+  avatarContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#1974f4',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  avatarText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 18,
+  },
   userInfoContainer: {
     backgroundColor: '#fff',
     padding: 14,
@@ -331,6 +428,7 @@ const styles = StyleSheet.create({
   listMeta: { flexDirection: 'row', alignItems: 'center', marginTop: 6, gap: 4 },
   listDate: { fontSize: 12, color: '#94a3b8' },
   listRemetente: { fontSize: 12, color: '#94a3b8', flex: 1 },
+  listObservacao: { fontSize: 12, color: '#64748b', marginTop: 4, fontStyle: 'italic' },
   emptyContainer: { padding: 30, alignItems: 'center', gap: 12 },
   emptyText: { color: '#64748b', fontSize: 13, textAlign: 'center' },
 });

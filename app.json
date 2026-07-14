@@ -16,8 +16,8 @@
       "bundleIdentifier": "com.neysdev.qrcondopro"
     },
     "android": {
-      "package": "com.neysdev.qrcondo_pro",
-      "versionCode": 3,
+      "package": "com.neysdev.qrcondopro",
+      "versionCode": 11,
       "backgroundColor": "#2E7D32",
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon.png",
@@ -45,7 +45,8 @@
         }
       ],
       "expo-audio",
-      "expo-video"
+      "expo-video",
+      "./plugins/withAndroidArchitectures"
     ],
     "extra": {
       "eas": {

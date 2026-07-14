@@ -1,4 +1,4 @@
-package com.neysdev.qrcondo_pro
+package com.neysdev.qrcondopro
 import expo.modules.splashscreen.SplashScreenManager
 
 import android.os.Build
